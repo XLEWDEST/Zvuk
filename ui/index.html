@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Zvuk Desktop</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <div id="login-view" class="login-view hidden">
+    <div class="login-card">
+      <div class="brand">
+        <div class="brand-mark">З</div>
+        <div class="brand-name">Zvuk <span>Desktop</span></div>
+      </div>
+      <h1>Слушайте Звук на компьютере</h1>
+      <p class="login-sub">Лёгкий десктоп-клиент музыкального сервиса Звук</p>
+
+      <div class="login-steps">
+        <div class="step">
+          <span class="step-num">1</span>
+          <span>Войдите на <b>zvuk.com</b> в любом браузере</span>
+        </div>
+        <div class="step">
+          <span class="step-num">2</span>
+          <span>Откройте <code>zvuk.com/api/tiny/profile</code> и скопируйте значение <code>token</code></span>
+        </div>
+        <div class="step">
+          <span class="step-num">3</span>
+          <span>Вставьте токен ниже и нажмите «Войти»</span>
+        </div>
+      </div>
+
+      <button id="open-token-btn" class="btn btn-ghost btn-full">Открыть страницу получения токена</button>
+
+      <div class="field">
+        <input id="token-input" type="password" placeholder="Вставьте токен..." autocomplete="off" spellcheck="false" />
+      </div>
+
+      <div class="login-actions">
+        <button id="login-btn" class="btn btn-primary">Войти</button>
+        <button id="anon-btn" class="btn">Анонимный вход</button>
+      </div>
+
+      <div id="login-status" class="login-status"></div>
+    </div>
+  </div>
+
+  <div id="app-view" class="app hidden">
+    <aside class="sidebar">
+      <div class="brand sidebar-brand">
+        <div class="brand-mark">З</div>
+        <div class="brand-name">Zvuk</div>
+      </div>
+      <nav class="sidebar-nav">
+        <a data-view="search" class="nav-item active" title="Поиск">
+          <svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27a6.5 6.5 0 1 0-.7.7l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0A4.5 4.5 0 1 1 14 9.5 4.5 4.5 0 0 1 9.5 14z"/></svg>
+          Поиск
+        </a>
+        <a data-view="library" class="nav-item" title="Моя музыка">
+          <svg viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
+          Моя музыка
+        </a>
+        <a data-view="playlists" class="nav-item" title="Плейлисты">
+          <svg viewBox="0 0 24 24"><path d="M15 6H3v2h12V6zm0 4H3v2h12v-2zM3 16h8v-2H3v2zm10-5l7 4-7 4v-8z"/></svg>
+          Плейлисты
+        </a>
+      </nav>
+      <div class="sidebar-footer">
+        <button id="logout-btn" class="btn btn-ghost">Выйти</button>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div class="search-wrap">
+          <svg class="search-icon" viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27a6.5 6.5 0 1 0-.7.7l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0A4.5 4.5 0 1 1 14 9.5 4.5 4.5 0 0 1 9.5 14z"/></svg>
+          <input id="search-input" type="text" placeholder="Треки, артисты, альбомы, плейлисты..." autocomplete="off" spellcheck="false" />
+          <div id="search-spinner" class="spinner hidden"></div>
+        </div>
+      </header>
+      <section id="content" class="content"></section>
+    </main>
+
+    <footer class="player hidden" id="player">
+      <div class="player-track">
+        <img id="player-cover" class="player-cover" alt="" />
+        <div class="player-meta">
+          <div id="player-title" class="player-title">—</div>
+          <div id="player-artist" class="player-artist">—</div>
+        </div>
+        <button id="player-like" class="player-btn" title="В избранное">♡</button>
+      </div>
+      <div class="player-controls">
+        <div class="player-buttons">
+          <button id="btn-prev" class="player-btn" title="Предыдущий">⏮</button>
+          <button id="btn-play" class="player-btn player-play" title="Воспроизвести/Пауза">▶</button>
+          <button id="btn-next" class="player-btn" title="Следующий">⏭</button>
+        </div>
+        <div class="player-progress">
+          <span id="pos-current" class="time">0:00</span>
+          <input id="seek" type="range" min="0" max="100" value="0" step="0.1" />
+          <span id="pos-total" class="time">0:00</span>
+        </div>
+      </div>
+      <div class="player-volume">
+        <svg class="vol-icon" viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3a4.5 4.5 0 0 0-2.5-4.03v8.05A4.5 4.5 0 0 0 16.5 12zM14 3.23v2.06a7 7 0 0 1 0 13.42v2.06a9 9 0 0 0 0-17.54z"/></svg>
+        <input id="volume" type="range" min="0" max="100" value="80" />
+      </div>
+    </footer>
+  </div>
+
+  <audio id="audio"></audio>
+  <div id="toast" class="toast hidden"></div>
+  <script src="js/vendor/hls.min.js"></script>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
