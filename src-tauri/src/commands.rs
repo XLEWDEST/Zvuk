@@ -158,6 +158,78 @@ pub async fn remove_from_collection(
         .map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+pub async fn get_artists(
+    state: State<'_, AppState>,
+    ids: Vec<String>,
+    with_releases: Option<bool>,
+    with_pop_tracks: Option<bool>,
+    with_related: Option<bool>,
+    with_desc: Option<bool>,
+) -> Result<Value, String> {
+    let api = api_from_state(&state)?;
+    api.get_artists(
+        &ids,
+        with_releases.unwrap_or(false),
+        with_pop_tracks.unwrap_or(false),
+        with_related.unwrap_or(false),
+        with_desc.unwrap_or(false),
+    )
+    .await
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn synthesis_build(
+    state: State<'_, AppState>,
+    first: String,
+    second: String,
+) -> Result<Value, String> {
+    let api = api_from_state(&state)?;
+    api.synthesis_build(&first, &second).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn create_playlist(
+    state: State<'_, AppState>,
+    name: String,
+    items: Vec<Value>,
+) -> Result<Value, String> {
+    let api = api_from_state(&state)?;
+    api.create_playlist(&name, &items).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn add_tracks_to_playlist(
+    state: State<'_, AppState>,
+    id: String,
+    items: Vec<Value>,
+) -> Result<Value, String> {
+    let api = api_from_state(&state)?;
+    api.add_tracks_to_playlist(&id, &items).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn update_playlist(
+    state: State<'_, AppState>,
+    id: String,
+    items: Vec<Value>,
+    is_public: bool,
+    name: String,
+) -> Result<Value, String> {
+    let api = api_from_state(&state)?;
+    api.update_playlist(&id, &items, is_public, &name).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn delete_playlist(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<Value, String> {
+    let api = api_from_state(&state)?;
+    api.delete_playlist(&id).await.map_err(|e| e.to_string())
+}
+
 pub fn restore_session(app: &AppHandle) {
     if let Some(token) = store::load() {
         let api = ZvukApi::new(token);

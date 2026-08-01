@@ -10,7 +10,7 @@
     "withGlobalTauri": true,
     "windows": [
       {
-        "title": "Zvuk Desktop",
+        "title": "Звук",
         "width": 1200,
         "height": 800,
         "minWidth": 940,

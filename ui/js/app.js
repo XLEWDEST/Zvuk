@@ -14,9 +14,43 @@ const state = {
   searchTimer: null,
   lastSearch: '',
   lastSearchData: null,
+  silaGenres: [],
 };
 
+const wave = { active: false, source: null };
 let hls = null;
+
+/* ---------------- settings ---------------- */
+
+const defaultSettings = {
+  volume: 80,
+  hifi: false,
+  hotkeys: {
+    playPause: 'Space',
+    prev: 'Ctrl+ArrowLeft',
+    next: 'Ctrl+ArrowRight',
+    search: 'Ctrl+f',
+    settings: 'Ctrl+,',
+  },
+};
+
+function loadSettings() {
+  try {
+    const raw = JSON.parse(localStorage.getItem('zvuk.settings')) || {};
+    return {
+      ...defaultSettings,
+      ...raw,
+      hotkeys: { ...defaultSettings.hotkeys, ...(raw.hotkeys || {}) },
+    };
+  } catch {
+    return JSON.parse(JSON.stringify(defaultSettings));
+  }
+}
+
+let settings = loadSettings();
+function saveSettings() {
+  localStorage.setItem('zvuk.settings', JSON.stringify(settings));
+}
 
 /* ---------------- helpers ---------------- */
 
@@ -58,6 +92,21 @@ function trackImage(track, size) {
   return '';
 }
 
+function shuffle(arr) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
+function markActive(view) {
+  document.querySelectorAll('.nav-item').forEach((n) => {
+    if (n.dataset.view === 'settings') return;
+    n.classList.toggle('active', n.dataset.view === view);
+  });
+}
+
 let toastTimer;
 function toast(msg, ok = false) {
   const el = $('#toast');
@@ -78,12 +127,12 @@ function setLoginStatus(msg, ok = false) {
 
 function setLoginLoading(on) {
   $('#login-btn').disabled = on;
-  $('#anon-btn').disabled = on;
 }
 
 function showLogin() {
   $('#login-view').classList.remove('hidden');
   $('#app-view').classList.add('hidden');
+  $('#settings-panel').classList.remove('open');
 }
 
 async function enterApp() {
@@ -96,10 +145,14 @@ async function enterApp() {
   } catch (e) {
     /* ignore */
   }
-  showView('library');
+  showView('home');
 }
 
 async function init() {
+  audio.volume = settings.volume / 100;
+  $('#volume').value = settings.volume;
+  $('#setting-hifi').checked = settings.hifi;
+  renderHotkeys();
   try {
     const hasToken = await invoke('saved_token_exists');
     if (hasToken) {
@@ -131,25 +184,11 @@ $('#login-btn').addEventListener('click', async () => {
   }
 });
 
-$('#anon-btn').addEventListener('click', async () => {
-  setLoginLoading(true);
-  try {
-    const token = await invoke('get_anonymous_token');
-    await invoke('set_token', { token });
-    setLoginStatus('Анонимный вход выполнен', true);
-    enterApp();
-  } catch (e) {
-    setLoginStatus(String(e));
-  } finally {
-    setLoginLoading(false);
-  }
-});
-
 $('#open-token-btn').addEventListener('click', () => {
   opener.openUrl('https://zvuk.com/api/tiny/profile');
 });
 
-$('#logout-btn').addEventListener('click', async () => {
+async function logout() {
   try {
     await invoke('clear_token');
   } catch (e) {
@@ -160,6 +199,7 @@ $('#logout-btn').addEventListener('click', async () => {
   state.streams.clear();
   state.currentTrackId = null;
   state.liked = new Set();
+  wave.active = false;
   if (hls) {
     hls.destroy();
     hls = null;
@@ -171,24 +211,44 @@ $('#logout-btn').addEventListener('click', async () => {
   $('#search-input').value = '';
   state.lastSearchData = null;
   showLogin();
-});
+}
+
+$('#settings-logout').addEventListener('click', logout);
+
+/* ---------------- tray events ---------------- */
+
+if (window.__TAURI__ && window.__TAURI__.event) {
+  window.__TAURI__.event.listen('tray-play-pause', () => togglePlay());
+  window.__TAURI__.event.listen('tray-prev', () => prev());
+  window.__TAURI__.event.listen('tray-next', () => next());
+}
 
 /* ---------------- views ---------------- */
 
 document.querySelectorAll('.nav-item').forEach((item) => {
-  item.addEventListener('click', () => showView(item.dataset.view));
+  item.addEventListener('click', () => {
+    const view = item.dataset.view;
+    if (view === 'settings') {
+      toggleSettings();
+      return;
+    }
+    showView(view);
+  });
 });
 
 function showView(view) {
   state.view = view;
-  document.querySelectorAll('.nav-item').forEach((n) => {
-    n.classList.toggle('active', n.dataset.view === view);
-  });
-  if (view === 'search') {
+  $('#settings-panel').classList.remove('open');
+  document
+    .querySelectorAll('.nav-item[data-view="settings"]')
+    .forEach((n) => n.classList.remove('active'));
+  markActive(view);
+  if (view === 'home') {
+    renderHome();
+  } else if (view === 'search') {
     if (state.lastSearchData) renderSearchResults(state.lastSearchData);
     else
       renderPlaceholder(
-        'Поиск',
         '🔎',
         'Начните вводить запрос, чтобы найти треки, артистов, альбомы и плейлисты'
       );
@@ -246,6 +306,453 @@ function section(title, count) {
   return s;
 }
 
+/* ---------------- home / Сила звука ---------------- */
+
+const SITUATIONS = [
+  { name: 'Тренировка', emoji: '🏃', q: 'энергичная тренировка' },
+  { name: 'Работа', emoji: '💻', q: 'музыка для работы' },
+  { name: 'Романтика', emoji: '❤️', q: 'романтика' },
+  { name: 'Вечеринка', emoji: '🎉', q: 'вечеринка' },
+  { name: 'Утро', emoji: '🌅', q: 'утренняя музыка' },
+  { name: 'В дорогу', emoji: '🚗', q: 'музыка в дорогу' },
+];
+
+const GENRES = ['Поп', 'Рок', 'Хип-хоп', 'Электроника', 'Джаз', 'Классика', 'Лоу-фай', 'Инди', 'Танцевальная'];
+
+async function renderHome() {
+  const content = $('#content');
+  content.innerHTML = '';
+  const title = document.createElement('div');
+  title.className = 'view-title';
+  title.textContent = 'Главное';
+  content.append(title);
+
+  content.append(silaPanel());
+
+  const aw = section('Волны по артистам', '');
+  const aGrid = document.createElement('div');
+  aGrid.className = 'card-grid';
+  aw.append(aGrid);
+  content.append(aw);
+
+  try {
+    const coll = await invoke('user_collection');
+    const ids = ((coll && coll.collection && coll.collection.artists) || [])
+      .map((a) => a.id)
+      .filter(Boolean)
+      .slice(0, 8);
+    if (ids.length) {
+      const data = await invoke('get_artists', { ids });
+      const arts = ((data && data.getArtists) || []).filter((a) => a && a.id);
+      aGrid.append(...arts.map(artistWaveCard));
+    } else {
+      const p = document.createElement('div');
+      p.className = 'placeholder';
+      p.style.padding = '30px 20px';
+      p.textContent = 'Лайкните артистов на zvuk.com, чтобы включить волны по ним';
+      aGrid.append(p);
+    }
+  } catch (e) {
+    /* ignore */
+  }
+
+  const sw = section('Волны по ситуациям', '');
+  const sGrid = document.createElement('div');
+  sGrid.className = 'wave-grid';
+  sGrid.append(...SITUATIONS.map(situationTile));
+  sw.append(sGrid);
+  content.append(sw);
+
+  const py = section('Плейлисты для вас', '');
+  const pGrid = document.createElement('div');
+  pGrid.className = 'card-grid';
+  py.append(pGrid);
+  content.append(py);
+  try {
+    const pls = await loadPlaylistsForYou();
+    if (pls.length) pGrid.append(...pls.map(playlistCard));
+    else {
+      const p = document.createElement('div');
+      p.className = 'placeholder';
+      p.style.padding = '30px 20px';
+      p.textContent = 'Не удалось загрузить подборки';
+      pGrid.append(p);
+    }
+  } catch (e) {
+    /* ignore */
+  }
+}
+
+function silaPanel() {
+  const panel = document.createElement('div');
+  panel.className = 'sila-panel';
+
+  const header = document.createElement('div');
+  header.className = 'sila-header';
+  const left = document.createElement('div');
+  const t = document.createElement('div');
+  t.className = 'sila-title';
+  t.innerHTML = 'Сила звука <span class="badge">волна</span>';
+  const d = document.createElement('div');
+  d.className = 'sila-desc';
+  d.textContent = 'Волна строится из ваших любимых треков и артистов. Настройте параметры и запустите — Звук подберёт подходящую музыку.';
+  left.append(t, d);
+  header.append(left);
+  panel.append(header);
+
+  const controls = document.createElement('div');
+  controls.className = 'sila-controls';
+  controls.append(silaSlider('sila-energy', 'Энергичность', 'спокойная', 'энергичная', 50));
+  controls.append(silaSlider('sila-mood', 'Настроение', 'грустная', 'весёлая', 50));
+  controls.append(silaSlider('sila-pop', 'Популярность', 'редкая', 'хиты', 50));
+
+  const langBlock = document.createElement('div');
+  langBlock.className = 'sila-slider';
+  const llabel = document.createElement('label');
+  llabel.innerHTML = '<span>Язык</span>';
+  const sel = document.createElement('select');
+  sel.className = 'sila-select';
+  sel.id = 'sila-lang';
+  sel.innerHTML =
+    '<option value="any">Любой</option><option value="ru">Русский</option><option value="en">Английский</option>';
+  langBlock.append(llabel, sel);
+  controls.append(langBlock);
+
+  const genreBlock = document.createElement('div');
+  genreBlock.className = 'sila-slider';
+  const glabel = document.createElement('label');
+  glabel.innerHTML = '<span>Жанры</span>';
+  const chips = document.createElement('div');
+  chips.className = 'chips';
+  GENRES.forEach((g) => {
+    const c = document.createElement('div');
+    c.className = 'chip';
+    c.textContent = g;
+    c.addEventListener('click', () => {
+      c.classList.toggle('on');
+      const i = state.silaGenres.indexOf(g);
+      if (i >= 0) state.silaGenres.splice(i, 1);
+      else state.silaGenres.push(g);
+    });
+    chips.append(c);
+  });
+  genreBlock.append(glabel, chips);
+  controls.append(genreBlock);
+
+  panel.append(controls);
+
+  const actions = document.createElement('div');
+  actions.className = 'sila-actions';
+  const start = document.createElement('button');
+  start.id = 'sila-start';
+  start.className = 'btn btn-primary';
+  start.textContent = 'Запустить волну';
+  start.addEventListener('click', () => startSilaWave());
+  const reset = document.createElement('button');
+  reset.id = 'sila-reset';
+  reset.className = 'btn hidden';
+  reset.textContent = 'Сбросить';
+  reset.addEventListener('click', resetSila);
+  actions.append(start, reset);
+  panel.append(actions);
+
+  const status = document.createElement('div');
+  status.id = 'sila-status';
+  status.className = 'wave-status';
+  panel.append(status);
+
+  return panel;
+}
+
+function silaSlider(id, label, low, high, value) {
+  const block = document.createElement('div');
+  block.className = 'sila-slider';
+  const l = document.createElement('label');
+  l.innerHTML = `<span>${label}</span><b id="${id}-val">${value}</b>`;
+  const input = document.createElement('input');
+  input.id = id;
+  input.type = 'range';
+  input.min = '0';
+  input.max = '100';
+  input.value = String(value);
+  input.addEventListener('input', () => {
+    document.getElementById(`${id}-val`).textContent = input.value;
+  });
+  const ends = document.createElement('div');
+  ends.className = 'ends';
+  const a = document.createElement('span');
+  a.textContent = low;
+  const b = document.createElement('span');
+  b.textContent = high;
+  ends.append(a, b);
+  block.append(l, input, ends);
+  return block;
+}
+
+function situationTile(s) {
+  const tile = document.createElement('div');
+  tile.className = 'wave-tile';
+  const emoji = document.createElement('div');
+  emoji.className = 'emoji';
+  emoji.textContent = s.emoji;
+  const name = document.createElement('div');
+  name.className = 'name';
+  name.textContent = s.name;
+  const sub = document.createElement('div');
+  sub.className = 'sub';
+  sub.textContent = 'Включить волну';
+  tile.append(emoji, name, sub);
+  tile.addEventListener('click', () => startSituationWave(s.name, s.q));
+  return tile;
+}
+
+function artistWaveCard(a) {
+  const card = document.createElement('div');
+  card.className = 'card artist-wave-card';
+  const img = document.createElement('img');
+  img.className = 'card-cover';
+  img.src = a.image ? coverUrl(a.image.src, '300x300') : '';
+  img.alt = '';
+  const t = document.createElement('div');
+  t.className = 'card-title';
+  t.textContent = a.title || '';
+  const sub = document.createElement('div');
+  sub.className = 'card-sub';
+  sub.textContent = 'Артист';
+  const play = document.createElement('button');
+  play.className = 'wave-play';
+  play.textContent = '▶';
+  play.title = 'Запустить волну';
+  play.addEventListener('click', (e) => {
+    e.stopPropagation();
+    startArtistWave(a.id, a.title);
+  });
+  card.append(img, t, sub, play);
+  card.addEventListener('click', () => openArtist(a.id));
+  return card;
+}
+
+/* ---------------- wave logic ---------------- */
+
+function silaVal(id, fallback) {
+  const el = document.getElementById(id);
+  return el ? Number(el.value) : fallback;
+}
+function silaLang() {
+  const el = document.getElementById('sila-lang');
+  return el ? el.value : 'any';
+}
+
+async function generateSilaQueue() {
+  const [tracksData, coll] = await Promise.all([invoke('user_tracks'), invoke('user_collection')]);
+  const likedIds = ((tracksData && tracksData.collection && tracksData.collection.tracks) || [])
+    .map((t) => t.id)
+    .filter(Boolean);
+  const artistIds = ((coll && coll.collection && coll.collection.artists) || [])
+    .map((a) => a.id)
+    .filter(Boolean);
+
+  const pool = [];
+  const seen = new Set();
+  const add = (t, src) => {
+    if (t && t.id && !seen.has(t.id)) {
+      seen.add(t.id);
+      pool.push(Object.assign({}, t, { _src: src }));
+    }
+  };
+
+  if (likedIds.length) {
+    try {
+      const tr = await invoke('get_tracks', { ids: likedIds.slice(0, 60) });
+      ((tr && tr.getTracks) || []).forEach((t) => add(t, 'like'));
+    } catch (e) {
+      /* ignore */
+    }
+  }
+
+  if (artistIds.length) {
+    try {
+      const art = await invoke('get_artists', { ids: artistIds.slice(0, 5), withPopTracks: true });
+      ((art && art.getArtists) || []).forEach((a) =>
+        ((a && a.popularTracks) || []).forEach((t) => add(t, 'artist'))
+      );
+    } catch (e) {
+      /* ignore */
+    }
+  }
+
+  const queries = [];
+  const energy = silaVal('sila-energy', 50);
+  const mood = silaVal('sila-mood', 50);
+  if (energy > 60) queries.push('энергичная музыка');
+  else if (energy < 40) queries.push('спокойная музыка');
+  if (mood > 60) queries.push('весёлая музыка');
+  else if (mood < 40) queries.push('грустная музыка');
+  state.silaGenres.slice(0, 2).forEach((g) => queries.push(g));
+  for (const q of queries) {
+    try {
+      const s = await invoke('search', { query: q, limit: 8 });
+      ((s && s.search && s.search.tracks && s.search.tracks.items) || []).forEach((t) => add(t, 'other'));
+    } catch (e) {
+      /* ignore */
+    }
+  }
+
+  const lang = silaLang();
+  let result = pool;
+  if (lang !== 'any') {
+    result = pool.filter((t) => {
+      const text = ((t.title || '') + ' ' + artistString(t)).toLowerCase();
+      const hasCyr = /[а-яё]/.test(text);
+      return lang === 'ru' ? hasCyr : !hasCyr;
+    });
+  }
+
+  const pop = silaVal('sila-pop', 50);
+  const likedOnly = result.filter((t) => t._src === 'like');
+  const artistOnly = result.filter((t) => t._src === 'artist');
+  const other = result.filter((t) => t._src !== 'like' && t._src !== 'artist');
+  if (pop >= 65) result = [...artistOnly, ...shuffle(other), ...shuffle(likedOnly)];
+  else if (pop <= 35) result = [...likedOnly, ...shuffle(other), ...shuffle(artistOnly)];
+  else shuffle(result);
+
+  return result;
+}
+
+async function startSilaWave() {
+  const btn = document.getElementById('sila-start');
+  if (btn) btn.disabled = true;
+  try {
+    const q = await generateSilaQueue();
+    if (!q.length) {
+      toast('Не удалось собрать волну: добавьте треки в избранное или поищите что-нибудь');
+      return;
+    }
+    wave.active = true;
+    wave.source = 'sila';
+    playQueue(q, 0);
+    const status = document.getElementById('sila-status');
+    if (status) status.innerHTML = `Волна играет · <b>${q.length} треков</b>`;
+    if (btn) btn.textContent = 'Перезапустить волну';
+    const reset = document.getElementById('sila-reset');
+    if (reset) reset.classList.remove('hidden');
+  } catch (e) {
+    toast(String(e));
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+function resetSila() {
+  wave.active = false;
+  wave.source = null;
+  $('#sila-energy').value = 50;
+  $('#sila-mood').value = 50;
+  $('#sila-pop').value = 50;
+  $('#sila-lang').value = 'any';
+  $('#sila-energy-val').textContent = '50';
+  $('#sila-mood-val').textContent = '50';
+  $('#sila-pop-val').textContent = '50';
+  state.silaGenres = [];
+  document.querySelectorAll('.chip.on').forEach((c) => c.classList.remove('on'));
+  const start = $('#sila-start');
+  if (start) start.textContent = 'Запустить волну';
+  $('#sila-reset').classList.add('hidden');
+  const status = $('#sila-status');
+  if (status) status.innerHTML = '';
+}
+
+async function startArtistWave(artistId, name) {
+  try {
+    const data = await invoke('get_artists', {
+      ids: [String(artistId)],
+      withPopTracks: true,
+      withRelated: true,
+    });
+    const a = (data && data.getArtists && data.getArtists[0]) || null;
+    if (!a) {
+      toast('Не удалось загрузить артиста');
+      return;
+    }
+    const tracks = [...((a.popularTracks || []).filter((t) => t && t.id))];
+    const rel = (a.relatedArtists || [])[0];
+    if (rel && rel.id) {
+      try {
+        const syn = await invoke('synthesis_build', { first: String(artistId), second: String(rel.id) });
+        const st = (syn && syn.synthesisPlaylistBuild && syn.synthesisPlaylistBuild.tracks) || [];
+        const seen = new Set(tracks.map((t) => t.id));
+        st.forEach((t) => {
+          if (t && t.id && !seen.has(t.id)) {
+            seen.add(t.id);
+            tracks.push(t);
+          }
+        });
+      } catch (e) {
+        /* synthesis может быть недоступен */
+      }
+    }
+    if (!tracks.length) {
+      toast('У артиста нет доступных треков');
+      return;
+    }
+    wave.active = true;
+    wave.source = 'artist';
+    playQueue(shuffle(tracks), 0);
+    toast(`Волна по артисту: ${name || a.title}`, true);
+  } catch (e) {
+    toast(String(e));
+  }
+}
+
+async function startSituationWave(name, q) {
+  try {
+    const s = await invoke('search', { query: q, limit: 12 });
+    const tracks = ((s && s.search && s.search.tracks && s.search.tracks.items) || []).filter(
+      (t) => t && t.id
+    );
+    if (!tracks.length) {
+      toast('Ничего не нашлось для этой ситуации');
+      return;
+    }
+    wave.active = true;
+    wave.source = 'situation';
+    playQueue(tracks, 0);
+    toast(`Волна: ${name}`, true);
+  } catch (e) {
+    toast(String(e));
+  }
+}
+
+function regenerateWave() {
+  if (wave.source === 'sila') {
+    startSilaWave();
+  } else {
+    shuffle(state.queue);
+    state.queueIndex = 0;
+    playCurrent();
+  }
+}
+
+async function loadPlaylistsForYou() {
+  const terms = ['хиты', 'новинки', 'для работы', 'лучшая музыка'];
+  const all = [];
+  const seen = new Set();
+  for (const term of terms.slice(0, 3)) {
+    try {
+      const s = await invoke('search', { query: term, limit: 8 });
+      ((s && s.search && s.search.playlists && s.search.playlists.items) || []).forEach((p) => {
+        if (p && p.id && !seen.has(p.id)) {
+          seen.add(p.id);
+          all.push(p);
+        }
+      });
+    } catch (e) {
+      /* ignore */
+    }
+  }
+  return all.slice(0, 12);
+}
+
 /* ---------------- search ---------------- */
 
 function doSearch(query) {
@@ -258,6 +765,7 @@ function doSearch(query) {
       const data = await invoke('search', { query: q, limit: 12 });
       state.lastSearch = q;
       state.lastSearchData = data;
+      markActive('search');
       renderSearchResults(data);
     } catch (e) {
       renderError(e);
@@ -273,7 +781,6 @@ $('#search-input').addEventListener('input', () => {
     state.lastSearch = '';
     state.lastSearchData = null;
     renderPlaceholder(
-      'Поиск',
       '🔎',
       'Начните вводить запрос, чтобы найти треки, артистов, альбомы и плейлисты'
     );
@@ -292,7 +799,7 @@ function renderSearchResults(data) {
   const playlists = (search.playlists && search.playlists.items) || [];
 
   if (!tracks.length && !artists.length && !releases.length && !playlists.length) {
-    renderPlaceholder('Поиск', '🙈', `Ничего не найдено по запросу «${esc(state.lastSearch)}»`);
+    renderPlaceholder('🙈', `Ничего не найдено по запросу «${esc(state.lastSearch)}»`);
     return;
   }
 
@@ -403,12 +910,21 @@ async function loadPlaylists() {
       .map((p) => p.id)
       .filter(Boolean);
     content.innerHTML = '';
+    const head = document.createElement('div');
+    head.className = 'view-head';
     const title = document.createElement('div');
     title.className = 'view-title';
+    title.style.marginBottom = '0';
     title.textContent = 'Плейлисты';
-    content.append(title);
+    const create = document.createElement('button');
+    create.className = 'btn btn-primary';
+    create.textContent = 'Создать плейлист';
+    create.addEventListener('click', () => openCreatePlaylist());
+    head.append(title, create);
+    content.append(head);
+
     if (!ids.length) {
-      renderPlaceholder('🗂️', 'Плейлисты не найдены. Создайте их на zvuk.com');
+      renderPlaceholder('🗂️', 'Плейлистов пока нет. Создайте первый — это удобно');
       return;
     }
     const data = await invoke('get_playlists', { ids });
@@ -422,6 +938,111 @@ async function loadPlaylists() {
     renderError(e);
   }
 }
+
+/* ---------------- playlist modal ---------------- */
+
+let modalState = { track: null };
+
+function openModal() {
+  $('#playlist-modal').classList.remove('hidden');
+}
+
+function closeModal() {
+  $('#playlist-modal').classList.add('hidden');
+  $('#modal-new-name').value = '';
+  modalState = { track: null };
+}
+
+async function openAddToPlaylist(track) {
+  modalState = { track };
+  $('#modal-title').textContent = 'Добавить в плейлист';
+  $('#modal-new-btn').textContent = 'Создать и добавить';
+  openModal();
+  const listEl = $('#modal-playlists');
+  listEl.innerHTML = '<div class="modal-playlist-empty">Загрузка…</div>';
+  try {
+    const pd = await invoke('user_playlists');
+    const ids = ((pd && pd.collection && pd.collection.playlists) || [])
+      .map((p) => p.id)
+      .filter(Boolean);
+    if (!ids.length) {
+      listEl.innerHTML =
+        '<div class="modal-playlist-empty">Плейлистов пока нет — создайте первый ниже</div>';
+      return;
+    }
+    const data = await invoke('get_playlists', { ids });
+    const pls = ((data && data.playlists) || []).filter((p) => p && p.id);
+    listEl.innerHTML = '';
+    pls.forEach((p) => {
+      const row = document.createElement('div');
+      row.className = 'modal-playlist-item';
+      const img = document.createElement('img');
+      img.src = p.image ? coverUrl(p.image.src, '100x100') : '';
+      img.alt = '';
+      const meta = document.createElement('div');
+      meta.style.minWidth = '0';
+      meta.style.flex = '1';
+      const t = document.createElement('div');
+      t.className = 'pl-title';
+      t.textContent = p.title || '';
+      const s = document.createElement('div');
+      s.className = 'pl-sub';
+      s.textContent = p.tracks && p.tracks.length ? `${p.tracks.length} треков` : 'Плейлист';
+      meta.append(t, s);
+      row.append(img, meta);
+      row.addEventListener('click', () => addToPlaylist(p.id, p.title));
+      listEl.append(row);
+    });
+  } catch (e) {
+    listEl.innerHTML = `<div class="modal-playlist-empty">${esc(String(e))}</div>`;
+  }
+}
+
+function openCreatePlaylist() {
+  modalState = { track: null };
+  $('#modal-title').textContent = 'Новый плейлист';
+  $('#modal-new-btn').textContent = 'Создать';
+  $('#modal-playlists').innerHTML =
+    '<div class="modal-playlist-empty">Введите название нового плейлиста</div>';
+  openModal();
+  $('#modal-new-name').focus();
+}
+
+async function addToPlaylist(playlistId, title) {
+  if (!modalState.track) return;
+  try {
+    await invoke('add_tracks_to_playlist', {
+      id: String(playlistId),
+      items: [{ type: 'track', item_id: modalState.track.id }],
+    });
+    toast(`Добавлено в «${title}»`, true);
+    closeModal();
+  } catch (e) {
+    toast(String(e));
+  }
+}
+
+$('#modal-close').addEventListener('click', closeModal);
+$('#modal-new-btn').addEventListener('click', async () => {
+  const name = $('#modal-new-name').value.trim();
+  if (!name) {
+    toast('Введите название');
+    return;
+  }
+  const items = modalState.track ? [{ type: 'track', item_id: modalState.track.id }] : [];
+  try {
+    await invoke('create_playlist', { name, items });
+    toast(`Плейлист «${name}» создан`, true);
+    closeModal();
+    if (state.view === 'playlists') loadPlaylists();
+  } catch (e) {
+    toast(String(e));
+  }
+});
+
+$('#playlist-modal').addEventListener('click', (e) => {
+  if (e.target.id === 'playlist-modal') closeModal();
+});
 
 /* ---------------- detail views ---------------- */
 
@@ -499,6 +1120,98 @@ function renderDetail(content, { kind, item }) {
   renderTrackList(tracks, content);
 }
 
+/* ---------------- artist page ---------------- */
+
+async function openArtist(id) {
+  const content = $('#content');
+  content.innerHTML = '';
+  content.append(spinnerBlock());
+  try {
+    const data = await invoke('get_artists', {
+      ids: [String(id)],
+      withReleases: true,
+      withPopTracks: true,
+      withRelated: true,
+      withDesc: true,
+    });
+    const a = (data && data.getArtists && data.getArtists[0]) || null;
+    if (!a || !a.id) {
+      content.innerHTML = '';
+      renderError('Артист не найден');
+      return;
+    }
+    content.innerHTML = '';
+
+    const header = document.createElement('div');
+    header.className = 'detail-header';
+    const img = document.createElement('img');
+    img.className = 'detail-cover';
+    img.src = a.image ? coverUrl(a.image.src, '400x400') : '';
+    img.alt = '';
+    const meta = document.createElement('div');
+    meta.className = 'detail-meta';
+    const type = document.createElement('div');
+    type.className = 'detail-type';
+    type.textContent = 'Артист';
+    const title = document.createElement('div');
+    title.className = 'detail-title';
+    title.textContent = a.title || '';
+    const sub = document.createElement('div');
+    sub.className = 'detail-sub';
+    const trackCount = (a.popularTracks || []).length;
+    sub.textContent = trackCount ? `${trackCount} популярных треков` : '';
+    meta.append(type, title, sub);
+    if (a.description) {
+      const bio = document.createElement('div');
+      bio.className = 'artist-bio';
+      bio.textContent = a.description;
+      const toggle = document.createElement('button');
+      toggle.className = 'btn btn-ghost bio-toggle';
+      toggle.textContent = 'Подробнее';
+      let expanded = false;
+      toggle.addEventListener('click', () => {
+        expanded = !expanded;
+        bio.classList.toggle('expanded', expanded);
+        toggle.textContent = expanded ? 'Скрыть' : 'Подробнее';
+      });
+      bio.style.marginTop = '10px';
+      meta.append(bio, toggle);
+    }
+    header.append(img, meta);
+    content.append(header);
+
+    const tracks = (a.popularTracks || []).filter((t) => t && t.id);
+    if (tracks.length) {
+      const sec = section('Популярные треки', `${tracks.length}`);
+      renderTrackList(tracks, sec);
+      content.append(sec);
+    }
+
+    const rels = (a.releases || []).filter((r) => r && r.id);
+    if (rels.length) {
+      const sec = section('Альбомы', `${rels.length}`);
+      const grid = document.createElement('div');
+      grid.className = 'card-grid';
+      grid.append(...rels.map(releaseCard));
+      sec.append(grid);
+      content.append(sec);
+    }
+
+    const related = (a.relatedArtists || []).filter((r) => r && r.id);
+    if (related.length) {
+      const sec = section('Похожие артисты', `${related.length}`);
+      const grid = document.createElement('div');
+      grid.className = 'card-grid';
+      grid.append(...related.map(artistCard));
+      sec.append(grid);
+      content.append(sec);
+    }
+  } catch (e) {
+    content.innerHTML = '';
+    renderError(e);
+  }
+}
+
 /* ---------------- cards ---------------- */
 
 function playlistCard(p) {
@@ -551,12 +1264,7 @@ function artistCard(a) {
   sub.className = 'card-sub';
   sub.textContent = 'Артист';
   card.append(img, t, sub);
-  card.addEventListener('click', () => {
-    $('#search-input').value = a.title;
-    state.lastSearch = a.title;
-    doSearch(a.title);
-    showView('search');
-  });
+  card.addEventListener('click', () => openArtist(a.id));
   return card;
 }
 
@@ -594,6 +1302,12 @@ function trackRow(track, index, list) {
   artist.textContent = artistString(track);
   main.append(title, artist);
 
+  const pl = document.createElement('button');
+  pl.className = 'pl-btn';
+  pl.textContent = '＋';
+  pl.title = 'В плейлист';
+  pl.dataset.id = track.id;
+
   const like = document.createElement('button');
   like.className = 'like-btn';
   const liked = state.liked.has(track.id);
@@ -606,9 +1320,13 @@ function trackRow(track, index, list) {
   dur.className = 'track-duration';
   dur.textContent = fmtTime(track.duration);
 
-  row.append(num, cover, main, like, dur);
+  row.append(num, cover, main, pl, like, dur);
 
   row.addEventListener('click', () => playQueue(list, index));
+  pl.addEventListener('click', (e) => {
+    e.stopPropagation();
+    openAddToPlaylist(track);
+  });
   like.addEventListener('click', (e) => {
     e.stopPropagation();
     toggleLike(track, like);
@@ -656,8 +1374,7 @@ function syncLikeButtons() {
 async function playQueue(list, index) {
   const track = list[index];
   if (track && state.currentTrackId === track.id) {
-    if (audio.paused) audio.play();
-    else audio.pause();
+    togglePlay();
     return;
   }
   state.queue = list;
@@ -677,7 +1394,9 @@ async function playCurrent() {
       const data = await invoke('get_stream', { ids: [track.id] });
       const items = (data && data.mediaContents) || [];
       const stream = items[0] && items[0].stream;
-      url = (stream && (stream.high || stream.mid || stream.flac)) || null;
+      url = settings.hifi
+        ? (stream && (stream.flac || stream.high || stream.mid)) || null
+        : (stream && (stream.high || stream.mid || stream.flac)) || null;
       if (url) state.streams.set(track.id, url);
     } catch (e) {
       toast(String(e));
@@ -727,6 +1446,7 @@ function updatePlayerUI(track) {
   $('#player-cover').src = trackImage(track, '200x200');
   $('#player-title').textContent = track.title || '';
   $('#player-artist').textContent = artistString(track);
+  syncLikeButtons();
   if (navigator.mediaSession) {
     const art = trackImage(track, '512x512');
     navigator.mediaSession.metadata = new MediaMetadata({
@@ -747,9 +1467,15 @@ function highlightQueue() {
 
 function next() {
   if (!state.queue.length) return;
-  if (state.queueIndex < state.queue.length - 1) state.queueIndex++;
-  else state.queueIndex = 0;
-  playCurrent();
+  if (state.queueIndex < state.queue.length - 1) {
+    state.queueIndex++;
+    playCurrent();
+  } else if (wave.active) {
+    regenerateWave();
+  } else {
+    state.queueIndex = 0;
+    playCurrent();
+  }
 }
 
 function prev() {
@@ -769,16 +1495,23 @@ function updatePlayBtn() {
   btn.textContent = playing ? '❚❚' : '▶';
 }
 
-$('#btn-play').addEventListener('click', () => {
+function togglePlay() {
   if (audio.paused) audio.play();
   else audio.pause();
-});
+}
+
+$('#btn-play').addEventListener('click', togglePlay);
 $('#btn-next').addEventListener('click', next);
 $('#btn-prev').addEventListener('click', prev);
 
 $('#player-like').addEventListener('click', () => {
   const track = state.queue[state.queueIndex];
   if (track) toggleLike(track, $('#player-like'));
+});
+
+$('#player-add-playlist').addEventListener('click', () => {
+  const track = state.queue[state.queueIndex];
+  if (track) openAddToPlaylist(track);
 });
 
 audio.addEventListener('timeupdate', () => {
@@ -807,7 +1540,10 @@ $('#seek').addEventListener('input', () => {
 });
 
 $('#volume').addEventListener('input', () => {
-  audio.volume = Number($('#volume').value) / 100;
+  const v = Number($('#volume').value);
+  audio.volume = v / 100;
+  settings.volume = v;
+  saveSettings();
 });
 
 if (navigator.mediaSession) {
@@ -822,18 +1558,125 @@ if (navigator.mediaSession) {
   });
 }
 
+/* ---------------- settings / hotkeys ---------------- */
+
+const HOTKEY_ACTIONS = [
+  { key: 'playPause', name: 'Пауза / Плей' },
+  { key: 'prev', name: 'Предыдущий трек' },
+  { key: 'next', name: 'Следующий трек' },
+  { key: 'search', name: 'Перейти к поиску' },
+  { key: 'settings', name: 'Открыть настройки' },
+];
+
+let captureHotkey = null;
+
+function prettyCombo(combo) {
+  if (!combo) return '—';
+  return combo
+    .split('+')
+    .map((p) => (p === 'Space' ? 'Пробел' : p === 'ArrowRight' ? '→' : p === 'ArrowLeft' ? '←' : p === 'ArrowUp' ? '↑' : p === 'ArrowDown' ? '↓' : p))
+    .join('+');
+}
+
+function renderHotkeys() {
+  const list = $('#hotkey-list');
+  if (!list) return;
+  list.innerHTML = '';
+  HOTKEY_ACTIONS.forEach((a) => {
+    const row = document.createElement('div');
+    row.className = 'hotkey-row';
+    const name = document.createElement('span');
+    name.className = 'name';
+    name.textContent = a.name;
+    const combo = document.createElement('button');
+    combo.className = 'combo';
+    const active = !settings.hotkeys[a.key];
+    combo.classList.toggle('active', active);
+    combo.textContent = prettyCombo(settings.hotkeys[a.key]);
+    if (captureHotkey === a.key) combo.classList.add('capture');
+    combo.addEventListener('click', () => {
+      if (captureHotkey === a.key) {
+        captureHotkey = null;
+        renderHotkeys();
+        return;
+      }
+      captureHotkey = a.key;
+      renderHotkeys();
+    });
+    row.append(name, combo);
+    list.append(row);
+  });
+}
+
+function setHotkey(action, combo) {
+  for (const k of Object.keys(settings.hotkeys)) {
+    if (k !== action && settings.hotkeys[k] === combo) settings.hotkeys[k] = null;
+  }
+  settings.hotkeys[action] = combo;
+  saveSettings();
+  captureHotkey = null;
+  renderHotkeys();
+  toast('Горячая клавиша обновлена', true);
+}
+
+function eventCombo(e) {
+  const parts = [];
+  if (e.ctrlKey) parts.push('Ctrl');
+  if (e.altKey) parts.push('Alt');
+  if (e.shiftKey) parts.push('Shift');
+  const key = e.key;
+  if (['Control', 'Alt', 'Shift', 'Meta'].includes(key)) return parts.length ? parts.join('+') : '';
+  if (key === ' ') return [...parts, 'Space'].join('+');
+  if (key === 'Escape') return [...parts, 'Escape'].join('+');
+  if (key.length === 1) return [...parts, key.toLowerCase()].join('+');
+  return [...parts, key].join('+');
+}
+
+function toggleSettings() {
+  const panel = $('#settings-panel');
+  const opened = !panel.classList.contains('open');
+  panel.classList.toggle('open', opened);
+  document
+    .querySelectorAll('.nav-item[data-view="settings"]')
+    .forEach((n) => n.classList.toggle('active', opened));
+}
+
+$('#settings-close').addEventListener('click', () => toggleSettings());
+$('#setting-hifi').addEventListener('change', () => {
+  settings.hifi = $('#setting-hifi').checked;
+  saveSettings();
+  state.streams.clear();
+  toast(settings.hifi ? 'Hi-Fi включён (FLAC)' : 'Обычное качество', true);
+});
+
 document.addEventListener('keydown', (e) => {
-  if (e.target && e.target.tagName === 'INPUT') return;
-  if (e.code === 'Space') {
+  if (captureHotkey) {
     e.preventDefault();
-    $('#btn-play').click();
-  } else if (e.key === 'ArrowRight' && e.ctrlKey) {
+    e.stopPropagation();
+    const combo = eventCombo(e);
+    if (combo === 'Escape') {
+      captureHotkey = null;
+      renderHotkeys();
+      return;
+    }
+    if (combo && !['Ctrl', 'Alt', 'Shift'].includes(combo)) setHotkey(captureHotkey, combo);
+    return;
+  }
+  if (e.target && e.target.tagName === 'INPUT') return;
+  const combo = eventCombo(e);
+  if (combo === settings.hotkeys.playPause) {
+    e.preventDefault();
+    togglePlay();
+  } else if (combo === settings.hotkeys.next) {
     next();
-  } else if (e.key === 'ArrowLeft' && e.ctrlKey) {
+  } else if (combo === settings.hotkeys.prev) {
     prev();
-  } else if ((e.key === 'f' || e.key === 'F') && e.ctrlKey) {
+  } else if (combo === settings.hotkeys.search) {
     e.preventDefault();
     showView('search');
+  } else if (combo === settings.hotkeys.settings) {
+    e.preventDefault();
+    toggleSettings();
   }
 });
 

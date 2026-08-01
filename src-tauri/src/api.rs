@@ -214,6 +214,101 @@ impl ZvukApi {
             Err(_) => self.quick_search("а", 1).await,
         }
     }
+
+    pub async fn get_artists(
+        &self,
+        ids: &[String],
+        with_releases: bool,
+        with_pop_tracks: bool,
+        with_related: bool,
+        with_desc: bool,
+    ) -> Result<Value, ApiError> {
+        self.gql(
+            GET_ARTISTS,
+            "getArtists",
+            json!({
+                "ids": ids,
+                "withReleases": with_releases,
+                "withPopTracks": with_pop_tracks,
+                "withRelatedArtists": with_related,
+                "withDescription": with_desc,
+                "releasesLimit": 12,
+                "tracksLimit": 20,
+                "releatedArtistsLimit": 12,
+            }),
+        )
+        .await
+    }
+
+    pub async fn synthesis_build(&self, first: &str, second: &str) -> Result<Value, ApiError> {
+        self.gql(
+            SYNTHESIS_BUILD,
+            "synthesisPlaylistBuild",
+            json!({ "firstAuthorId": first, "secondAuthorId": second }),
+        )
+        .await
+    }
+
+    pub async fn synthesis(&self, ids: &[String]) -> Result<Value, ApiError> {
+        self.gql(SYNTHESIS, "synthesisPlaylist", json!({ "ids": ids }))
+            .await
+    }
+
+    pub async fn create_playlist(&self, name: &str, items: &[Value]) -> Result<Value, ApiError> {
+        self.gql(
+            CREATE_PLAYLIST,
+            "createPlayList",
+            json!({ "name": name, "items": items }),
+        )
+        .await
+    }
+
+    pub async fn add_tracks_to_playlist(
+        &self,
+        id: &str,
+        items: &[Value],
+    ) -> Result<Value, ApiError> {
+        self.gql(
+            ADD_TRACKS,
+            "addTracksToPlaylist",
+            json!({ "id": id, "items": items }),
+        )
+        .await
+    }
+
+    pub async fn get_playlist_tracks(
+        &self,
+        id: &str,
+        limit: u32,
+        offset: u32,
+    ) -> Result<Value, ApiError> {
+        self.gql(
+            GET_PLAYLIST_TRACKS,
+            "getPlaylistTracks",
+            json!({ "id": id, "limit": limit, "offset": offset }),
+        )
+        .await
+    }
+
+    pub async fn delete_playlist(&self, id: &str) -> Result<Value, ApiError> {
+        self.gql(DELETE_PLAYLIST, "deletePlaylist", json!({ "id": id }))
+            .await
+    }
+
+    pub async fn update_playlist(
+        &self,
+        id: &str,
+        items: &[Value],
+        is_public: bool,
+        name: &str,
+    ) -> Result<Value, ApiError> {
+        self.gql(
+            UPDATE_PLAYLIST,
+            "updatePlaylist",
+            json!({ "id": id, "items": items, "isPublic": is_public, "name": name }),
+        )
+        .await
+    }
 }
 
 const QUICK_SEARCH: &str = r#"query GetSearch($query: String, $limit: Int) {
@@ -328,6 +423,7 @@ const GET_STREAM: &str = r#"query GetStream($ids: [ID!]!) {
       stream {
         expire
         expireDelta
+        flac
         flacdrm
         high
         mid
@@ -337,6 +433,8 @@ const GET_STREAM: &str = r#"query GetStream($ids: [ID!]!) {
       stream {
         expire
         expireDelta
+        flac
+        flacdrm
         high
         mid
       }
@@ -345,6 +443,8 @@ const GET_STREAM: &str = r#"query GetStream($ids: [ID!]!) {
       stream {
         expire
         expireDelta
+        flac
+        flacdrm
         high
         mid
       }
@@ -475,6 +575,115 @@ const REMOVE_ITEM: &str = r#"mutation removeItemFromCollection($id: ID, $type: C
   }
 }"#;
 
+const GET_ARTISTS: &str = r#"query getArtists(
+  $ids: [ID!]!
+  $withReleases: Boolean = false
+  $withPopTracks: Boolean = false
+  $withRelatedArtists: Boolean = false
+  $withDescription: Boolean = false
+  $releasesLimit: Int = 100
+  $tracksLimit: Int = 100
+  $releatedArtistsLimit: Int = 100
+) {
+  getArtists(ids: $ids) {
+    id
+    title
+    image { src }
+    searchTitle
+    description @include(if: $withDescription)
+    releases(offset: 0, limit: $releasesLimit) @include(if: $withReleases) {
+      id
+      title
+      date
+      type
+      image { src }
+      explicit
+      artists { id title image { src } }
+    }
+    popularTracks(offset: 0, limit: $tracksLimit) @include(if: $withPopTracks) {
+      id
+      title
+      duration
+      explicit
+      hasFlac
+      artists { id title image { src } }
+      release { id title date type image { src } explicit artists { id title image { src } } }
+    }
+    relatedArtists(limit: $releatedArtistsLimit) @include(if: $withRelatedArtists) {
+      id
+      title
+      image { src }
+    }
+  }
+}"#;
+
+const SYNTHESIS_BUILD: &str = r#"query synthesisPlaylistBuild($firstAuthorId: ID!, $secondAuthorId: ID!) {
+  synthesisPlaylistBuild(authorIds: [$firstAuthorId, $secondAuthorId]) {
+    id
+    tracks {
+      id
+      title
+      duration
+      explicit
+      hasFlac
+      artists { id title image { src } }
+      release { id title date type image { src } explicit artists { id title image { src } } }
+    }
+    authors { id name image { src } matches { score } }
+  }
+}"#;
+
+const SYNTHESIS: &str = r#"query synthesisPlaylist($ids: [ID!]!) {
+  synthesisPlaylist(ids: $ids) {
+    id
+    tracks {
+      id
+      title
+      duration
+      explicit
+      hasFlac
+      artists { id title image { src } }
+      release { id title date type image { src } explicit artists { id title image { src } } }
+    }
+    authors { id name image { src } matches { score } }
+  }
+}"#;
+
+const CREATE_PLAYLIST: &str = r#"mutation createPlayList($items: [PlaylistItem!]!, $name: String!) {
+  playlist {
+    create(items: $items, name: $name)
+  }
+}"#;
+
+const ADD_TRACKS: &str = r#"mutation addTracksToPlaylist($id: ID!, $items: [PlaylistItem!]!) {
+  playlist {
+    addItems(id: $id, items: $items)
+  }
+}"#;
+
+const GET_PLAYLIST_TRACKS: &str = r#"query getPlaylistTracks($id: ID!, $limit: Int = 5, $offset: Int = 0) {
+  playlistTracks(id: $id, limit: $limit, offset: $offset) {
+    id
+    title
+    duration
+    explicit
+    artists { id title image { src } }
+    release { id title date type image { src } explicit artists { id title image { src } } }
+  }
+}"#;
+
+const DELETE_PLAYLIST: &str = r#"mutation deletePlaylist($id: ID!) {
+  playlist {
+    delete(id: $id)
+  }
+}"#;
+
+const UPDATE_PLAYLIST: &str = r#"mutation updatePlaylist($id: ID!, $items: [PlaylistItem!]!, $isPublic: Boolean!, $name: String!) {
+  playlist {
+    update(id: $id, items: $items, isPublic: $isPublic, name: $name)
+  }
+}"#;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -535,6 +744,100 @@ mod tests {
         match api.verify().await {
             Ok(v) => println!("verify ok (unexpected): {v}"),
             Err(e) => println!("verify err: {e}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn introspect_schema() {
+        let token = ZvukApi::anonymous_token().await.unwrap();
+        let api = ZvukApi::new(token);
+        let query = r#"{__schema{queryType{fields{name args{name} type{kind name ofType{kind name ofType{name}}}}}} mutationType{fields{name args{name}}}}"#;
+        match api.gql(query, "__schema", json!({})).await {
+            Ok(v) => {
+                let s = serde_json::to_string(&v).unwrap();
+                println!("SCHEMA_START {s} SCHEMA_END");
+            }
+            Err(e) => println!("introspect err: {e}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn artists_works() {
+        let token = ZvukApi::anonymous_token().await.unwrap();
+        let api = ZvukApi::new(token);
+        let id = "1463485".to_string();
+        let res = api
+            .get_artists(&[id], true, true, true, true)
+            .await
+            .unwrap();
+        let artist = &res["getArtists"][0];
+        println!("artist: {} / {} / releases: {} / popTracks: {} / related: {}",
+            artist["title"].as_str().unwrap_or("?"),
+            artist["description"].as_str().unwrap_or("").chars().take(60).collect::<String>(),
+            artist["releases"].as_array().map(|a| a.len()).unwrap_or(0),
+            artist["popularTracks"].as_array().map(|a| a.len()).unwrap_or(0),
+            artist["relatedArtists"].as_array().map(|a| a.len()).unwrap_or(0),
+        );
+    }
+
+    #[tokio::test]
+    async fn synthesis_works() {
+        let token = ZvukApi::anonymous_token().await.unwrap();
+        let api = ZvukApi::new(token);
+        let a = api
+            .quick_search("меладзе", 1)
+            .await
+            .unwrap()["quickSearch"]["content"][0]["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let b = api
+            .quick_search("polnalyubvi", 1)
+            .await
+            .unwrap()["quickSearch"]["content"][0]["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        println!("authors: {a}, {b}");
+        match api.synthesis_build(&a, &b).await {
+            Ok(v) => println!("synthesisBuild: {v}"),
+            Err(e) => println!("synthesisBuild err: {e}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn playlist_flow() {
+        let Some(token) = crate::store::load() else {
+            println!("no saved token; skip playlist_flow");
+            return;
+        };
+        let api = ZvukApi::new(token);
+        let s = api.quick_search("меладзе", 1).await.unwrap();
+        let track_id = s["quickSearch"]["content"][0]["id"]
+            .as_str()
+            .expect("no track id")
+            .to_string();
+        let created = match api.create_playlist("Тест клиента", &[]).await {
+            Ok(v) => v,
+            Err(e) => {
+                println!("create err: {e}");
+                return;
+            }
+        };
+        println!("create: {created}");
+        let pid = created["playlist"]["create"].as_str().unwrap().to_string();
+        let items = vec![json!({ "type": "track", "item_id": track_id })];
+        match api.add_tracks_to_playlist(&pid, &items).await {
+            Ok(v) => println!("addTracks: {v}"),
+            Err(e) => println!("addTracks err: {e}"),
+        }
+        match api.get_playlist_tracks(&pid, 10, 0).await {
+            Ok(v) => println!("getTracks: {v}"),
+            Err(e) => println!("getTracks err: {e}"),
+        }
+        match api.delete_playlist(&pid).await {
+            Ok(v) => println!("delete: {v}"),
+            Err(e) => println!("delete err: {e}"),
         }
     }
 }

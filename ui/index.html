@@ -3,15 +3,15 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Zvuk Desktop</title>
+  <title>Звук</title>
   <link rel="stylesheet" href="css/style.css" />
 </head>
 <body>
   <div id="login-view" class="login-view hidden">
     <div class="login-card">
       <div class="brand">
-        <div class="brand-mark">З</div>
-        <div class="brand-name">Zvuk <span>Desktop</span></div>
+        <div class="brand-mark"><img src="assets/zvuk.png" alt="" /></div>
+        <div class="brand-name">Звук <span>Desktop</span></div>
       </div>
       <h1>Слушайте Звук на компьютере</h1>
       <p class="login-sub">Лёгкий десктоп-клиент музыкального сервиса Звук</p>
@@ -38,8 +38,7 @@
       </div>
 
       <div class="login-actions">
-        <button id="login-btn" class="btn btn-primary">Войти</button>
-        <button id="anon-btn" class="btn">Анонимный вход</button>
+        <button id="login-btn" class="btn btn-primary btn-full">Войти</button>
       </div>
 
       <div id="login-status" class="login-status"></div>
@@ -49,10 +48,14 @@
   <div id="app-view" class="app hidden">
     <aside class="sidebar">
       <div class="brand sidebar-brand">
-        <div class="brand-mark">З</div>
-        <div class="brand-name">Zvuk</div>
+        <div class="brand-mark brand-mark-sm"><img src="assets/zvuk.png" alt="" /></div>
+        <div class="brand-name">Звук</div>
       </div>
       <nav class="sidebar-nav">
+        <a data-view="home" class="nav-item" title="Главное">
+          <svg viewBox="0 0 24 24"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg>
+          Главное
+        </a>
         <a data-view="search" class="nav-item active" title="Поиск">
           <svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27a6.5 6.5 0 1 0-.7.7l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0A4.5 4.5 0 1 1 14 9.5 4.5 4.5 0 0 1 9.5 14z"/></svg>
           Поиск
@@ -67,7 +70,10 @@
         </a>
       </nav>
       <div class="sidebar-footer">
-        <button id="logout-btn" class="btn btn-ghost">Выйти</button>
+        <a data-view="settings" class="nav-item" title="Настройки">
+          <svg viewBox="0 0 24 24"><path d="M19.14 12.94a7.07 7.07 0 0 0 .06-.94 7.07 7.07 0 0 0-.06-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.61-.22l-2.39.96a7.31 7.31 0 0 0-1.62-.94l-.36-2.54a.5.5 0 0 0-.5-.42h-3.84a.5.5 0 0 0-.5.42l-.36 2.54c-.59.24-1.13.56-1.62.94l-2.39-.96a.5.5 0 0 0-.61.22L2.41 8.84a.5.5 0 0 0 .12.64l2.03 1.58a7.07 7.07 0 0 0-.06.94c0 .32.02.63.06.94L2.53 14.52a.5.5 0 0 0-.12.64l1.92 3.32c.14.23.4.33.61.22l2.39-.96c.49.38 1.03.7 1.62.94l.36 2.54c.04.24.25.42.5.42h3.84c.25 0 .46-.18.5-.42l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.11.47.01.61-.22l1.92-3.32a.5.5 0 0 0-.12-.64l-2.03-1.58zM12 15.5A3.5 3.5 0 1 1 12 8a3.5 3.5 0 0 1 0 7.5z"/></svg>
+          Настройки
+        </a>
       </div>
     </aside>
 
@@ -89,13 +95,14 @@
           <div id="player-title" class="player-title">—</div>
           <div id="player-artist" class="player-artist">—</div>
         </div>
-        <button id="player-like" class="player-btn" title="В избранное">♡</button>
       </div>
       <div class="player-controls">
         <div class="player-buttons">
           <button id="btn-prev" class="player-btn" title="Предыдущий">⏮</button>
+          <button id="player-like" class="player-btn" title="В избранное">♡</button>
           <button id="btn-play" class="player-btn player-play" title="Воспроизвести/Пауза">▶</button>
           <button id="btn-next" class="player-btn" title="Следующий">⏭</button>
+          <button id="player-add-playlist" class="player-btn" title="В плейлист">＋</button>
         </div>
         <div class="player-progress">
           <span id="pos-current" class="time">0:00</span>
@@ -108,6 +115,41 @@
         <input id="volume" type="range" min="0" max="100" value="80" />
       </div>
     </footer>
+
+    <div id="settings-panel" class="settings-panel">
+      <div class="settings-header">
+        <div class="settings-title">Настройки</div>
+        <button id="settings-close" class="player-btn" title="Закрыть">✕</button>
+      </div>
+      <div class="settings-body">
+        <div class="settings-group">
+          <div class="settings-group-title">Качество звука</div>
+          <label class="switch-row">
+            <span>Hi-Fi звук <small>(FLAC, если доступен)</small></span>
+            <input type="checkbox" id="setting-hifi" />
+          </label>
+        </div>
+        <div class="settings-group">
+          <div class="settings-group-title">Горячие клавиши</div>
+          <div class="hotkey-list" id="hotkey-list"></div>
+        </div>
+        <div class="settings-group">
+          <button id="settings-logout" class="btn btn-danger">Выйти из аккаунта</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="playlist-modal" class="modal-overlay hidden">
+    <div class="modal">
+      <div class="modal-title" id="modal-title">Добавить в плейлист</div>
+      <div id="modal-playlists" class="modal-playlists"></div>
+      <div class="modal-new">
+        <input id="modal-new-name" type="text" placeholder="Название нового плейлиста" spellcheck="false" />
+        <button id="modal-new-btn" class="btn btn-primary">Создать и добавить</button>
+      </div>
+      <button id="modal-close" class="btn btn-ghost btn-full">Закрыть</button>
+    </div>
   </div>
 
   <audio id="audio"></audio>
