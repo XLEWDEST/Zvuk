@@ -20,6 +20,9 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 keyring = { version = "3", features = ["windows-native"] }
 tauri-plugin-opener = "2"
+tauri-plugin-global-shortcut = "2"
+tauri-plugin-single-instance = "2"
+discord-rich-presence = "0.2"
 
 [profile.release]
 codegen-units = 1

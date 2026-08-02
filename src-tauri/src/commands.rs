@@ -1,7 +1,10 @@
+use std::collections::HashMap;
+
 use serde_json::{json, Value};
 use tauri::{AppHandle, Manager, State};
 
 use crate::api::ZvukApi;
+use crate::discord::{self, DiscordMsg};
 use crate::store;
 use crate::AppState;
 
@@ -33,7 +36,6 @@ pub async fn set_token(state: State<'_, AppState>, token: String) -> Result<Valu
 }
 
 #[tauri::command]
-#[allow(dead_code)]
 pub async fn verify_session(state: State<'_, AppState>) -> Result<Value, String> {
     let api = api_from_state(&state)?;
     api.verify().await.map_err(|e| e.to_string())
@@ -57,6 +59,50 @@ pub async fn open_token_page(app: AppHandle) -> Result<(), String> {
     app.opener()
         .open_url("https://zvuk.com/api/tiny/profile", None::<&str>)
         .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn set_hotkeys(
+    app: AppHandle,
+    hotkeys: HashMap<String, Option<String>>,
+) -> Result<(), String> {
+    use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
+
+    let gs = app.global_shortcut();
+    gs.unregister_all().map_err(|e| e.to_string())?;
+    let state = app.state::<AppState>();
+    let mut actions = state.shortcut_actions.lock().unwrap();
+    actions.clear();
+    for (action, combo) in hotkeys {
+        let Some(combo) = combo else { continue };
+        let combo = combo.trim();
+        if combo.is_empty() {
+            continue;
+        }
+        let sc: Shortcut = combo.parse().map_err(|_| "Некорректная комбинация клавиш")?;
+        actions.insert(sc.id(), action);
+        gs.register(sc).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn discord_update(
+    state: State<'_, AppState>,
+    status: discord::DiscordStatus,
+) -> Result<(), String> {
+    if let Some(tx) = state.discord_tx.lock().unwrap().as_ref() {
+        let _ = tx.send(DiscordMsg::Status(status));
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn discord_clear(state: State<'_, AppState>) -> Result<(), String> {
+    if let Some(tx) = state.discord_tx.lock().unwrap().as_ref() {
+        let _ = tx.send(DiscordMsg::Clear);
+    }
+    Ok(())
 }
 
 #[tauri::command]

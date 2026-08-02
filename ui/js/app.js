@@ -25,22 +25,22 @@ let hls = null;
 const defaultSettings = {
   volume: 80,
   hifi: false,
+  discordRpc: true,
   hotkeys: {
-    playPause: 'Space',
-    prev: 'Ctrl+ArrowLeft',
-    next: 'Ctrl+ArrowRight',
-    search: 'Ctrl+f',
+    playPause: null,
+    prev: null,
+    next: null,
   },
 };
 
 function loadSettings() {
   try {
     const raw = JSON.parse(localStorage.getItem('zvuk.settings')) || {};
-    return {
-      ...defaultSettings,
-      ...raw,
-      hotkeys: { ...defaultSettings.hotkeys, ...(raw.hotkeys || {}) },
-    };
+    const hotkeys = { ...defaultSettings.hotkeys, ...(raw.hotkeys || {}) };
+    for (const k of Object.keys(hotkeys)) {
+      if (!(k in defaultSettings.hotkeys)) delete hotkeys[k];
+    }
+    return { ...defaultSettings, ...raw, hotkeys };
   } catch {
     return JSON.parse(JSON.stringify(defaultSettings));
   }
@@ -49,6 +49,10 @@ function loadSettings() {
 let settings = loadSettings();
 function saveSettings() {
   localStorage.setItem('zvuk.settings', JSON.stringify(settings));
+}
+
+function applyHotkeys() {
+  invoke('set_hotkeys', { hotkeys: settings.hotkeys }).catch(() => {});
 }
 
 /* ---------------- helpers ---------------- */
@@ -159,11 +163,12 @@ async function init() {
   audio.volume = settings.volume / 100;
   $('#volume').value = settings.volume;
   renderHotkeys();
+  applyHotkeys();
   try {
     const hasToken = await invoke('saved_token_exists');
     if (hasToken) {
-      await invoke('verify_session');
       enterApp();
+      invoke('verify_session').catch(() => {});
       return;
     }
   } catch (e) {
@@ -200,6 +205,7 @@ async function logout() {
   } catch (e) {
     /* ignore */
   }
+  invoke('discord_clear').catch(() => {});
   state.queue = [];
   state.queueIndex = -1;
   state.streams.clear();
@@ -229,6 +235,13 @@ if (window.__TAURI__ && window.__TAURI__.event) {
   window.__TAURI__.event.listen('tray-play-pause', () => togglePlay());
   window.__TAURI__.event.listen('tray-prev', () => prev());
   window.__TAURI__.event.listen('tray-next', () => next());
+  window.__TAURI__.event.listen('hotkey', (e) => {
+    if (captureHotkey) return;
+    const action = e.payload;
+    if (action === 'playPause') togglePlay();
+    else if (action === 'prev') prev();
+    else if (action === 'next') next();
+  });
 }
 
 /* ---------------- views ---------------- */
@@ -312,15 +325,6 @@ function section(title, count) {
 
 /* ---------------- home / Сила звука ---------------- */
 
-const SITUATIONS = [
-  { name: 'Тренировка', emoji: '🏃', q: 'энергичная тренировка' },
-  { name: 'Работа', emoji: '💻', q: 'музыка для работы' },
-  { name: 'Романтика', emoji: '❤️', q: 'романтика' },
-  { name: 'Вечеринка', emoji: '🎉', q: 'вечеринка' },
-  { name: 'Утро', emoji: '🌅', q: 'утренняя музыка' },
-  { name: 'В дорогу', emoji: '🚗', q: 'музыка в дорогу' },
-];
-
 const GENRES = ['Поп', 'Рок', 'Хип-хоп', 'Электроника', 'Джаз', 'Классика', 'Лоу-фай', 'Инди', 'Танцевальная'];
 
 async function renderHome() {
@@ -343,8 +347,7 @@ async function renderHome() {
     const coll = await invoke('user_collection');
     const ids = ((coll && coll.collection && coll.collection.artists) || [])
       .map((a) => a.id)
-      .filter(Boolean)
-      .slice(0, 8);
+      .filter(Boolean);
     if (ids.length) {
       const data = await invoke('get_artists', { ids });
       const arts = ((data && data.getArtists) || []).filter((a) => a && a.id);
@@ -355,32 +358,6 @@ async function renderHome() {
       p.style.padding = '30px 20px';
       p.textContent = 'Лайкните артистов на zvuk.com, чтобы включить волны по ним';
       aGrid.append(p);
-    }
-  } catch (e) {
-    /* ignore */
-  }
-
-  const sw = section('Волны по ситуациям', '');
-  const sGrid = document.createElement('div');
-  sGrid.className = 'wave-grid';
-  sGrid.append(...SITUATIONS.map(situationTile));
-  sw.append(sGrid);
-  content.append(sw);
-
-  const py = section('Плейлисты для вас', '');
-  const pGrid = document.createElement('div');
-  pGrid.className = 'card-grid';
-  py.append(pGrid);
-  content.append(py);
-  try {
-    const pls = await loadPlaylistsForYou();
-    if (pls.length) pGrid.append(...pls.map(playlistCard));
-    else {
-      const p = document.createElement('div');
-      p.className = 'placeholder';
-      p.style.padding = '30px 20px';
-      p.textContent = 'Не удалось загрузить подборки';
-      pGrid.append(p);
     }
   } catch (e) {
     /* ignore */
@@ -497,25 +474,6 @@ function silaSlider(id, label, low, high, value) {
   ends.append(a, b);
   block.append(l, input, ends);
   return block;
-}
-
-function situationTile(s) {
-  const tile = document.createElement('div');
-  tile.className = 'wave-tile';
-  const emoji = document.createElement('div');
-  emoji.className = 'emoji';
-  emoji.textContent = s.emoji;
-  const name = document.createElement('div');
-  name.className = 'name';
-  name.textContent = s.name;
-  const sub = document.createElement('div');
-  sub.className = 'sub';
-  const isActive = wave.active && wave.source === 'situation' && wave.name === s.name;
-  sub.textContent = isActive ? `Играет · ${wave.count} треков` : 'Включить волну';
-  tile.append(emoji, name, sub);
-  if (isActive) tile.classList.add('active');
-  tile.addEventListener('click', () => startSituationWave(s.name, s.q));
-  return tile;
 }
 
 function artistWaveCard(a) {
@@ -724,27 +682,6 @@ async function startArtistWave(artistId, name) {
   }
 }
 
-async function startSituationWave(name, q) {
-  try {
-    const s = await invoke('search', { query: q, limit: 12 });
-    const tracks = ((s && s.search && s.search.tracks && s.search.tracks.items) || []).filter(
-      (t) => t && t.id
-    );
-    if (!tracks.length) {
-      toast('Ничего не нашлось для этой ситуации');
-      return;
-    }
-    wave.active = true;
-    wave.source = 'situation';
-    wave.count = tracks.length;
-    wave.name = name;
-    playQueue(tracks, 0);
-    toast(`Волна: ${name}`, true);
-  } catch (e) {
-    toast(String(e));
-  }
-}
-
 function regenerateWave() {
   if (wave.source === 'sila') {
     startSilaWave();
@@ -753,26 +690,6 @@ function regenerateWave() {
     state.queueIndex = 0;
     playCurrent();
   }
-}
-
-async function loadPlaylistsForYou() {
-  const terms = ['хиты', 'новинки', 'для работы', 'лучшая музыка'];
-  const all = [];
-  const seen = new Set();
-  for (const term of terms.slice(0, 3)) {
-    try {
-      const s = await invoke('search', { query: term, limit: 8 });
-      ((s && s.search && s.search.playlists && s.search.playlists.items) || []).forEach((p) => {
-        if (p && p.id && !seen.has(p.id)) {
-          seen.add(p.id);
-          all.push(p);
-        }
-      });
-    } catch (e) {
-      /* ignore */
-    }
-  }
-  return all.slice(0, 12);
 }
 
 /* ---------------- search ---------------- */
@@ -1474,6 +1391,7 @@ async function playCurrent() {
   if (!track) return;
   state.currentTrackId = track.id;
   updatePlayerUI(track);
+  discordStatus(track, true);
   highlightQueue();
   let url = state.streams.get(track.id);
   if (!url) {
@@ -1545,6 +1463,18 @@ function updatePlayerUI(track) {
   }
 }
 
+function discordStatus(track, playing) {
+  if (!track || !settings.discordRpc) return;
+  invoke('discord_update', {
+    status: {
+      title: track.title || '',
+      artist: artistString(track) || '',
+      cover: trackImage(track, '512x512') || '',
+      playing: !!playing,
+    },
+  }).catch(() => {});
+}
+
 function highlightQueue() {
   const currentId = state.currentTrackId;
   document.querySelectorAll('.track-row').forEach((row) => {
@@ -1599,6 +1529,10 @@ $('#player-like').addEventListener('click', () => {
 $('#player-add-playlist').addEventListener('click', () => {
   const track = state.queue[state.queueIndex];
   if (track) openAddToPlaylist(track);
+});
+
+$('#player-download').addEventListener('click', () => {
+  toast('Скачивание треков появится позже');
 });
 
 $('#player-queue').addEventListener('click', toggleQueue);
@@ -1669,8 +1603,14 @@ audio.addEventListener('loadedmetadata', () => {
 });
 
 audio.addEventListener('ended', next);
-audio.addEventListener('play', updatePlayBtn);
-audio.addEventListener('pause', updatePlayBtn);
+audio.addEventListener('play', () => {
+  updatePlayBtn();
+  discordStatus(state.queue[state.queueIndex], true);
+});
+audio.addEventListener('pause', () => {
+  updatePlayBtn();
+  discordStatus(state.queue[state.queueIndex], false);
+});
 audio.addEventListener('error', () => {
   toast('Ошибка воспроизведения');
   updatePlayBtn();
@@ -1707,7 +1647,6 @@ const HOTKEY_ACTIONS = [
   { key: 'playPause', name: 'Пауза / Плей' },
   { key: 'prev', name: 'Предыдущий трек' },
   { key: 'next', name: 'Следующий трек' },
-  { key: 'search', name: 'Перейти к поиску' },
 ];
 
 let captureHotkey = null;
@@ -1756,6 +1695,7 @@ function setHotkey(action, combo) {
   }
   settings.hotkeys[action] = combo;
   saveSettings();
+  applyHotkeys();
   captureHotkey = null;
   renderHotkeys();
   toast('Горячая клавиша обновлена', true);
@@ -1821,6 +1761,33 @@ function renderSettings() {
   hGroup.append(hTitle, hotkeys);
   body.append(hGroup);
 
+  const dGroup = document.createElement('div');
+  dGroup.className = 'settings-group';
+  const dTitle = document.createElement('div');
+  dTitle.className = 'settings-group-title';
+  dTitle.textContent = 'Discord';
+  const dRow = document.createElement('label');
+  dRow.className = 'switch-row';
+  const dSpan = document.createElement('span');
+  dSpan.append('Показывать статус в Discord');
+  const dInput = document.createElement('input');
+  dInput.type = 'checkbox';
+  dInput.id = 'setting-discord';
+  dInput.checked = settings.discordRpc;
+  dInput.addEventListener('change', () => {
+    settings.discordRpc = dInput.checked;
+    saveSettings();
+    if (!settings.discordRpc) {
+      invoke('discord_clear').catch(() => {});
+    } else {
+      discordStatus(state.queue[state.queueIndex], !audio.paused);
+    }
+    toast(settings.discordRpc ? 'Discord RPC включён' : 'Discord RPC выключен', true);
+  });
+  dRow.append(dSpan, dInput);
+  dGroup.append(dTitle, dRow);
+  body.append(dGroup);
+
   const lGroup = document.createElement('div');
   lGroup.className = 'settings-group';
   const logoutBtn = document.createElement('button');
@@ -1846,20 +1813,6 @@ document.addEventListener('keydown', (e) => {
       return;
     }
     if (combo && !['Ctrl', 'Alt', 'Shift'].includes(combo)) setHotkey(captureHotkey, combo);
-    return;
-  }
-  if (e.target && e.target.tagName === 'INPUT') return;
-  const combo = eventCombo(e);
-  if (combo === settings.hotkeys.playPause) {
-    e.preventDefault();
-    togglePlay();
-  } else if (combo === settings.hotkeys.next) {
-    next();
-  } else if (combo === settings.hotkeys.prev) {
-    prev();
-  } else if (combo === settings.hotkeys.search) {
-    e.preventDefault();
-    showView('search');
   }
 });
 

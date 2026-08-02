@@ -526,27 +526,6 @@ input[type="range"]::-webkit-slider-thumb {
 
 /* ---------- waves ---------- */
 
-.wave-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-  gap: 14px;
-}
-.wave-tile {
-  border-radius: 14px;
-  padding: 20px 14px 16px;
-  text-align: center;
-  cursor: pointer;
-  background: var(--bg-elev);
-  border: 1px solid var(--border);
-  transition: all 0.15s;
-}
-.wave-tile:hover { border-color: var(--accent); background: var(--bg-elev2); transform: translateY(-2px); }
-.wave-tile.active { border-color: var(--accent); background: rgba(22, 224, 168, 0.08); }
-.wave-tile.active .sub { color: var(--accent); }
-.wave-tile .emoji { font-size: 34px; line-height: 1; }
-.wave-tile .name { margin-top: 10px; font-weight: 600; font-size: 13.5px; }
-.wave-tile .sub { color: var(--text-dim); font-size: 11.5px; margin-top: 3px; }
-
 .artist-wave-card { position: relative; }
 .artist-wave-card.active { box-shadow: 0 0 0 1px var(--accent), 0 10px 28px rgba(22, 224, 168, 0.18); }
 .artist-wave-card.active .card-sub { color: var(--accent); }
