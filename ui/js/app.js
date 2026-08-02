@@ -17,7 +17,7 @@ const state = {
   silaGenres: [],
 };
 
-const wave = { active: false, source: null };
+const wave = { active: false, source: null, count: 0, name: null };
 let hls = null;
 
 /* ---------------- settings ---------------- */
@@ -30,7 +30,6 @@ const defaultSettings = {
     prev: 'Ctrl+ArrowLeft',
     next: 'Ctrl+ArrowRight',
     search: 'Ctrl+f',
-    settings: 'Ctrl+,',
   },
 };
 
@@ -92,6 +91,16 @@ function trackImage(track, size) {
   return '';
 }
 
+function playlistImage(p, size) {
+  if (p.image && p.image.src) return coverUrl(p.image.src, size);
+  const tracks = (p.tracks || []).filter((t) => t && t.id);
+  for (const t of tracks) {
+    const src = trackImage(t, size);
+    if (src) return src;
+  }
+  return '';
+}
+
 function shuffle(arr) {
   for (let i = arr.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
@@ -102,7 +111,6 @@ function shuffle(arr) {
 
 function markActive(view) {
   document.querySelectorAll('.nav-item').forEach((n) => {
-    if (n.dataset.view === 'settings') return;
     n.classList.toggle('active', n.dataset.view === view);
   });
 }
@@ -132,7 +140,6 @@ function setLoginLoading(on) {
 function showLogin() {
   $('#login-view').classList.remove('hidden');
   $('#app-view').classList.add('hidden');
-  $('#settings-panel').classList.remove('open');
 }
 
 async function enterApp() {
@@ -151,7 +158,6 @@ async function enterApp() {
 async function init() {
   audio.volume = settings.volume / 100;
   $('#volume').value = settings.volume;
-  $('#setting-hifi').checked = settings.hifi;
   renderHotkeys();
   try {
     const hasToken = await invoke('saved_token_exists');
@@ -200,6 +206,9 @@ async function logout() {
   state.currentTrackId = null;
   state.liked = new Set();
   wave.active = false;
+  wave.source = null;
+  wave.count = 0;
+  wave.name = null;
   if (hls) {
     hls.destroy();
     hls = null;
@@ -208,12 +217,11 @@ async function logout() {
   audio.removeAttribute('src');
   audio.load();
   $('#player').classList.add('hidden');
+  closeQueue();
   $('#search-input').value = '';
   state.lastSearchData = null;
   showLogin();
 }
-
-$('#settings-logout').addEventListener('click', logout);
 
 /* ---------------- tray events ---------------- */
 
@@ -227,18 +235,12 @@ if (window.__TAURI__ && window.__TAURI__.event) {
 
 document.querySelectorAll('.nav-item').forEach((item) => {
   item.addEventListener('click', () => {
-    const view = item.dataset.view;
-    if (view === 'settings') {
-      toggleSettings();
-      return;
-    }
-    showView(view);
+    showView(item.dataset.view);
   });
 });
 
 function showView(view) {
   state.view = view;
-  $('#settings-panel').classList.remove('open');
   document
     .querySelectorAll('.nav-item[data-view="settings"]')
     .forEach((n) => n.classList.remove('active'));
@@ -257,6 +259,8 @@ function showView(view) {
     loadLibrary();
   } else if (view === 'playlists') {
     loadPlaylists();
+  } else if (view === 'settings') {
+    renderSettings();
   }
 }
 
@@ -461,6 +465,12 @@ function silaPanel() {
   status.className = 'wave-status';
   panel.append(status);
 
+  if (wave.active) {
+    if (wave.source === 'sila') start.textContent = 'Перезапустить волну';
+    reset.classList.remove('hidden');
+    status.innerHTML = `Волна играет · <b>${wave.count} треков</b>`;
+  }
+
   return panel;
 }
 
@@ -500,8 +510,10 @@ function situationTile(s) {
   name.textContent = s.name;
   const sub = document.createElement('div');
   sub.className = 'sub';
-  sub.textContent = 'Включить волну';
+  const isActive = wave.active && wave.source === 'situation' && wave.name === s.name;
+  sub.textContent = isActive ? `Играет · ${wave.count} треков` : 'Включить волну';
   tile.append(emoji, name, sub);
+  if (isActive) tile.classList.add('active');
   tile.addEventListener('click', () => startSituationWave(s.name, s.q));
   return tile;
 }
@@ -509,6 +521,8 @@ function situationTile(s) {
 function artistWaveCard(a) {
   const card = document.createElement('div');
   card.className = 'card artist-wave-card';
+  const isArtistActive = wave.active && wave.source === 'artist' && wave.name === a.title;
+  if (isArtistActive) card.classList.add('active');
   const img = document.createElement('img');
   img.className = 'card-cover';
   img.src = a.image ? coverUrl(a.image.src, '300x300') : '';
@@ -518,7 +532,7 @@ function artistWaveCard(a) {
   t.textContent = a.title || '';
   const sub = document.createElement('div');
   sub.className = 'card-sub';
-  sub.textContent = 'Артист';
+  sub.textContent = isArtistActive ? `Волна играет · ${wave.count} треков` : 'Артист';
   const play = document.createElement('button');
   play.className = 'wave-play';
   play.textContent = '▶';
@@ -630,6 +644,8 @@ async function startSilaWave() {
     }
     wave.active = true;
     wave.source = 'sila';
+    wave.count = q.length;
+    wave.name = null;
     playQueue(q, 0);
     const status = document.getElementById('sila-status');
     if (status) status.innerHTML = `Волна играет · <b>${q.length} треков</b>`;
@@ -646,6 +662,8 @@ async function startSilaWave() {
 function resetSila() {
   wave.active = false;
   wave.source = null;
+  wave.count = 0;
+  wave.name = null;
   $('#sila-energy').value = 50;
   $('#sila-mood').value = 50;
   $('#sila-pop').value = 50;
@@ -697,6 +715,8 @@ async function startArtistWave(artistId, name) {
     }
     wave.active = true;
     wave.source = 'artist';
+    wave.count = tracks.length;
+    wave.name = a.title || name;
     playQueue(shuffle(tracks), 0);
     toast(`Волна по артисту: ${name || a.title}`, true);
   } catch (e) {
@@ -716,6 +736,8 @@ async function startSituationWave(name, q) {
     }
     wave.active = true;
     wave.source = 'situation';
+    wave.count = tracks.length;
+    wave.name = name;
     playQueue(tracks, 0);
     toast(`Волна: ${name}`, true);
   } catch (e) {
@@ -977,7 +999,7 @@ async function openAddToPlaylist(track) {
       const row = document.createElement('div');
       row.className = 'modal-playlist-item';
       const img = document.createElement('img');
-      img.src = p.image ? coverUrl(p.image.src, '100x100') : '';
+      img.src = playlistImage(p, '100x100');
       img.alt = '';
       const meta = document.createElement('div');
       meta.style.minWidth = '0';
@@ -1090,7 +1112,7 @@ function renderDetail(content, { kind, item }) {
   header.className = 'detail-header';
   const img = document.createElement('img');
   img.className = 'detail-cover';
-  img.src = item.image ? coverUrl(item.image.src, '400x400') : '';
+  img.src = playlistImage(item, '400x400');
   img.alt = '';
   const meta = document.createElement('div');
   meta.className = 'detail-meta';
@@ -1104,6 +1126,38 @@ function renderDetail(content, { kind, item }) {
   sub.className = 'detail-sub';
   sub.textContent = artistString(item);
   meta.append(type, title, sub);
+  if (kind === 'playlist') {
+    const actions = document.createElement('div');
+    actions.className = 'detail-actions';
+    const del = document.createElement('button');
+    del.className = 'btn btn-danger';
+    del.textContent = 'Удалить плейлист';
+    let armed = false;
+    let armTimer = null;
+    del.addEventListener('click', async () => {
+      if (!armed) {
+        armed = true;
+        del.textContent = 'Точно удалить?';
+        clearTimeout(armTimer);
+        armTimer = setTimeout(() => {
+          armed = false;
+          del.textContent = 'Удалить плейлист';
+        }, 3000);
+        return;
+      }
+      clearTimeout(armTimer);
+      try {
+        await invoke('delete_playlist', { id: String(item.id) });
+        toast('Плейлист удалён', true);
+        showView('playlists');
+        loadPlaylists();
+      } catch (e) {
+        toast(String(e));
+      }
+    });
+    actions.append(del);
+    meta.append(actions);
+  }
   header.append(img, meta);
   content.append(header);
 
@@ -1117,7 +1171,27 @@ function renderDetail(content, { kind, item }) {
     const url = stream.high || stream.mid || stream.flac;
     if (url) state.streams.set(t.id, url);
   });
-  renderTrackList(tracks, content);
+  const opts =
+    kind === 'playlist' ? { remove: (track) => removeFromPlaylist(item, track) } : {};
+  renderTrackList(tracks, content, opts);
+}
+
+async function removeFromPlaylist(playlist, track) {
+  const remaining = (playlist.tracks || [])
+    .filter((t) => t && t.id && t.id !== track.id)
+    .map((t) => ({ type: 'track', item_id: t.id }));
+  try {
+    await invoke('update_playlist', {
+      id: String(playlist.id),
+      items: remaining,
+      isPublic: !!playlist.isPublic,
+      name: playlist.title || '',
+    });
+    toast(`Удалено из «${playlist.title || ''}»`, true);
+    openPlaylist(playlist.id);
+  } catch (e) {
+    toast(String(e));
+  }
 }
 
 /* ---------------- artist page ---------------- */
@@ -1219,7 +1293,7 @@ function playlistCard(p) {
   card.className = 'card';
   const img = document.createElement('img');
   img.className = 'card-cover';
-  img.src = p.image ? coverUrl(p.image.src, '300x300') : '';
+  img.src = playlistImage(p, '300x300');
   img.alt = '';
   const t = document.createElement('div');
   t.className = 'card-title';
@@ -1270,14 +1344,14 @@ function artistCard(a) {
 
 /* ---------------- track list ---------------- */
 
-function renderTrackList(tracks, container) {
+function renderTrackList(tracks, container, opts = {}) {
   const list = document.createElement('div');
   list.className = 'track-list';
-  tracks.forEach((t, i) => list.append(trackRow(t, i, tracks)));
+  tracks.forEach((t, i) => list.append(trackRow(t, i, tracks, opts)));
   container.append(list);
 }
 
-function trackRow(track, index, list) {
+function trackRow(track, index, list, opts = {}) {
   const row = document.createElement('div');
   row.className = 'track-row';
   if (track.id === state.currentTrackId) row.classList.add('playing');
@@ -1320,7 +1394,20 @@ function trackRow(track, index, list) {
   dur.className = 'track-duration';
   dur.textContent = fmtTime(track.duration);
 
-  row.append(num, cover, main, pl, like, dur);
+  let rem = null;
+  if (opts.remove) {
+    rem = document.createElement('button');
+    rem.className = 'remove-btn';
+    rem.textContent = '✕';
+    rem.title = 'Удалить из плейлиста';
+    rem.addEventListener('click', (e) => {
+      e.stopPropagation();
+      opts.remove(track);
+    });
+  }
+
+  row.append(num, cover, main, pl, like, rem || dur);
+  if (rem) row.append(dur);
 
   row.addEventListener('click', () => playQueue(list, index));
   pl.addEventListener('click', (e) => {
@@ -1514,6 +1601,62 @@ $('#player-add-playlist').addEventListener('click', () => {
   if (track) openAddToPlaylist(track);
 });
 
+$('#player-queue').addEventListener('click', toggleQueue);
+$('#queue-close').addEventListener('click', closeQueue);
+
+function toggleQueue() {
+  if ($('#queue-panel').classList.contains('hidden')) openQueue();
+  else closeQueue();
+}
+
+function openQueue() {
+  renderQueue();
+  $('#queue-panel').classList.remove('hidden');
+}
+
+function closeQueue() {
+  $('#queue-panel').classList.add('hidden');
+}
+
+function renderQueue() {
+  const list = $('#queue-list');
+  list.innerHTML = '';
+  if (!state.queue.length) {
+    const empty = document.createElement('div');
+    empty.className = 'queue-empty';
+    empty.textContent = 'Очередь пуста. Включите трек или запустите волну.';
+    list.append(empty);
+    return;
+  }
+  state.queue.forEach((t, i) => {
+    const row = document.createElement('div');
+    row.className = 'queue-row';
+    if (i === state.queueIndex) row.classList.add('playing');
+    const img = document.createElement('img');
+    img.src = trackImage(t, '72x72');
+    img.alt = '';
+    const main = document.createElement('div');
+    main.className = 'queue-main';
+    const name = document.createElement('div');
+    name.className = 'queue-name';
+    name.textContent = t.title || '';
+    const artist = document.createElement('div');
+    artist.className = 'queue-artist';
+    artist.textContent = artistString(t);
+    main.append(name, artist);
+    row.append(img, main);
+    row.addEventListener('click', () => {
+      if (i === state.queueIndex && !audio.paused) {
+        closeQueue();
+        return;
+      }
+      playQueue(state.queue, i);
+      closeQueue();
+    });
+    list.append(row);
+  });
+}
+
 audio.addEventListener('timeupdate', () => {
   if (!audio.duration || !isFinite(audio.duration)) return;
   $('#seek').value = (audio.currentTime / audio.duration) * 100;
@@ -1565,7 +1708,6 @@ const HOTKEY_ACTIONS = [
   { key: 'prev', name: 'Предыдущий трек' },
   { key: 'next', name: 'Следующий трек' },
   { key: 'search', name: 'Перейти к поиску' },
-  { key: 'settings', name: 'Открыть настройки' },
 ];
 
 let captureHotkey = null;
@@ -1632,22 +1774,66 @@ function eventCombo(e) {
   return [...parts, key].join('+');
 }
 
-function toggleSettings() {
-  const panel = $('#settings-panel');
-  const opened = !panel.classList.contains('open');
-  panel.classList.toggle('open', opened);
-  document
-    .querySelectorAll('.nav-item[data-view="settings"]')
-    .forEach((n) => n.classList.toggle('active', opened));
-}
+function renderSettings() {
+  const content = $('#content');
+  content.innerHTML = '';
+  const title = document.createElement('div');
+  title.className = 'view-title';
+  title.textContent = 'Настройки';
+  content.append(title);
 
-$('#settings-close').addEventListener('click', () => toggleSettings());
-$('#setting-hifi').addEventListener('change', () => {
-  settings.hifi = $('#setting-hifi').checked;
-  saveSettings();
-  state.streams.clear();
-  toast(settings.hifi ? 'Hi-Fi включён (FLAC)' : 'Обычное качество', true);
-});
+  const body = document.createElement('div');
+  body.className = 'settings-body';
+
+  const qGroup = document.createElement('div');
+  qGroup.className = 'settings-group';
+  const qTitle = document.createElement('div');
+  qTitle.className = 'settings-group-title';
+  qTitle.textContent = 'Качество звука';
+  const qRow = document.createElement('label');
+  qRow.className = 'switch-row';
+  const qSpan = document.createElement('span');
+  const qSmall = document.createElement('small');
+  qSmall.textContent = '(FLAC, если доступен)';
+  qSpan.append('Hi-Fi звук ', qSmall);
+  const qInput = document.createElement('input');
+  qInput.type = 'checkbox';
+  qInput.id = 'setting-hifi';
+  qInput.checked = settings.hifi;
+  qInput.addEventListener('change', () => {
+    settings.hifi = qInput.checked;
+    saveSettings();
+    state.streams.clear();
+    toast(settings.hifi ? 'Hi-Fi включён (FLAC)' : 'Обычное качество', true);
+  });
+  qRow.append(qSpan, qInput);
+  qGroup.append(qTitle, qRow);
+  body.append(qGroup);
+
+  const hGroup = document.createElement('div');
+  hGroup.className = 'settings-group';
+  const hTitle = document.createElement('div');
+  hTitle.className = 'settings-group-title';
+  hTitle.textContent = 'Горячие клавиши';
+  const hotkeys = document.createElement('div');
+  hotkeys.className = 'hotkey-list';
+  hotkeys.id = 'hotkey-list';
+  hGroup.append(hTitle, hotkeys);
+  body.append(hGroup);
+
+  const lGroup = document.createElement('div');
+  lGroup.className = 'settings-group';
+  const logoutBtn = document.createElement('button');
+  logoutBtn.className = 'btn btn-danger';
+  logoutBtn.style.alignSelf = 'flex-start';
+  logoutBtn.textContent = 'Выйти из аккаунта';
+  logoutBtn.addEventListener('click', logout);
+  lGroup.append(logoutBtn);
+  body.append(lGroup);
+
+  content.append(body);
+  renderHotkeys();
+}
 
 document.addEventListener('keydown', (e) => {
   if (captureHotkey) {
@@ -1674,9 +1860,6 @@ document.addEventListener('keydown', (e) => {
   } else if (combo === settings.hotkeys.search) {
     e.preventDefault();
     showView('search');
-  } else if (combo === settings.hotkeys.settings) {
-    e.preventDefault();
-    toggleSettings();
   }
 });
 

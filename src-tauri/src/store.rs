@@ -50,3 +50,17 @@ pub fn clear() -> Result<(), String> {
     let _ = cleared;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn store_roundtrip() {
+        let token = format!("test-token-{}", std::process::id());
+        save(&token).expect("save");
+        let loaded = load();
+        assert_eq!(loaded.as_deref(), Some(token.as_str()));
+        clear().expect("clear");
+        assert_eq!(load(), None);
+    }
+}
