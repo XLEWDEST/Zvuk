@@ -1,3 +1,4 @@
+
 # Zvuk Desktop
 
 > **⚠️Дисклеймер:**
@@ -12,6 +13,11 @@
 > По запросу правообладателя репозиторий и релизы будут удалены.
 
 Лёгкий **НЕОФИЦИАЛЬНЫЙ** десктоп-клиент музыкального сервиса [Звук](https://zvuk.com) для Windows, по духу — как VK Music / Яндекс Музыка.
+
+<img width="1197" height="828" alt="image" src="https://github.com/user-attachments/assets/b6be781d-274e-400f-ac1e-c9dbbc1637af" />
+<img width="1196" height="825" alt="image" src="https://github.com/user-attachments/assets/d5412e8b-bfe9-4eb7-b1f9-74c4a70b7263" />
+<img width="1198" height="827" alt="image" src="https://github.com/user-attachments/assets/414ab934-ad0c-4428-a2b7-69fc1f09d0e8" />
+
 
 - Поиск треков, артистов, альбомов и плейлистов
 - «Моя музыка»: любимые треки, альбомы и плейлисты с вашего аккаунта
