@@ -1,6 +1,22 @@
 const { invoke } = window.__TAURI__.core;
 const opener = window.__TAURI__.opener;
 
+let _actEmitting = false;
+['mousemove', 'click', 'keydown', 'wheel', 'touchstart'].forEach((evt) => {
+  document.addEventListener(
+    evt,
+    () => {
+      if (_actEmitting) return;
+      _actEmitting = true;
+      setTimeout(() => {
+        _actEmitting = false;
+        invoke('user_active').catch(() => {});
+      }, 5000);
+    },
+    { passive: true }
+  );
+});
+
 const $ = (sel) => document.querySelector(sel);
 const audio = $('#audio');
 
@@ -15,12 +31,15 @@ const state = {
   lastSearch: '',
   lastSearchData: null,
   silaGenres: [],
+  fullSilaQueue: [],
 };
 
 const wave = { active: false, source: null, count: 0, name: null };
 let hls = null;
 
 /* ---------------- settings ---------------- */
+
+const MAX_QUEUE = 10;
 
 const defaultSettings = {
   volume: 80,
@@ -49,6 +68,37 @@ function loadSettings() {
 let settings = loadSettings();
 function saveSettings() {
   localStorage.setItem('zvuk.settings', JSON.stringify(settings));
+}
+
+const LAST_KEY = 'zvuk.lastTrack';
+
+function saveLastState() {
+  try {
+    localStorage.setItem(
+      LAST_KEY,
+      JSON.stringify({ q: state.queue, i: state.queueIndex })
+    );
+  } catch (e) {
+    /* ignore */
+  }
+}
+
+function restoreLastState() {
+  try {
+    const raw = localStorage.getItem(LAST_KEY);
+    if (!raw) return;
+    const d = JSON.parse(raw);
+    if (!d || !Array.isArray(d.q) || !d.q[d.i]) return;
+    state.queue = d.q;
+    state.queueIndex = d.i;
+    const track = d.q[d.i];
+    state.currentTrackId = track.id;
+    updatePlayerUI(track);
+    discordStatus(track, false);
+    highlightQueue();
+  } catch (e) {
+    /* ignore */
+  }
 }
 
 function applyHotkeys() {
@@ -156,7 +206,61 @@ async function enterApp() {
   } catch (e) {
     /* ignore */
   }
+  restoreLastState();
   showView('home');
+}
+
+function addToQueue(track) {
+  if (state.queue.some(t => t.id === track.id)) return;
+  state.queue.push(track);
+  if (state.queue.length > MAX_QUEUE) {
+    if (state.queueIndex > 0) {
+      state.queue.shift();
+      state.queueIndex--;
+    } else {
+      state.queue.pop();
+    }
+  }
+}
+
+async function loadMoreTracks() {
+  const lastTrack = state.queue[state.queue.length - 1];
+  if (!lastTrack) return;
+  try {
+    const data = await invoke('get_similar_tracks', { trackId: lastTrack.id, limit: 5 });
+    const newTracks = (data && data.tracks) || [];
+    for (const t of newTracks) {
+      if (!state.queue.some(q => q.id === t.id)) {
+        state.queue.push(t);
+      }
+    }
+    while (state.queue.length > MAX_QUEUE + 5) {
+      if (state.queueIndex > 0) {
+        state.queue.shift();
+        state.queueIndex--;
+      } else {
+        state.queue.pop();
+      }
+    }
+  } catch (e) { /* ignore */ }
+}
+
+async function loadMoreSilaTracks() {
+  if (!state.fullSilaQueue || state.fullSilaQueue.length === 0) return;
+  const nextTrack = state.fullSilaQueue[state.queue.length];
+  if (nextTrack) state.queue.push(nextTrack);
+  if (state.queue.length === state.fullSilaQueue.length) {
+    const currentTrack = state.queue[state.queueIndex];
+    if (currentTrack) {
+      const newTracks = await generateSilaQueue();
+      state.fullSilaQueue = newTracks;
+      for (const t of newTracks) {
+        if (!state.queue.some(q => q.id === t.id)) {
+          state.queue.push(t);
+        }
+      }
+    }
+  }
 }
 
 async function init() {
@@ -222,7 +326,7 @@ async function logout() {
   audio.pause();
   audio.removeAttribute('src');
   audio.load();
-  $('#player').classList.add('hidden');
+  localStorage.removeItem(LAST_KEY);
   closeQueue();
   $('#search-input').value = '';
   state.lastSearchData = null;
@@ -424,23 +528,29 @@ function silaPanel() {
 
   const actions = document.createElement('div');
   actions.className = 'sila-actions';
+  
+  const leftGroup = document.createElement('div');
+  leftGroup.className = 'sila-left-group';
+  
   const start = document.createElement('button');
   start.id = 'sila-start';
   start.className = 'btn btn-primary';
   start.textContent = 'Запустить волну';
   start.addEventListener('click', () => startSilaWave());
+  
   const reset = document.createElement('button');
   reset.id = 'sila-reset';
   reset.className = 'btn hidden';
   reset.textContent = 'Сбросить';
   reset.addEventListener('click', resetSila);
-  actions.append(start, reset);
-  panel.append(actions);
-
+  
   const status = document.createElement('div');
   status.id = 'sila-status';
   status.className = 'wave-status';
-  panel.append(status);
+  
+  leftGroup.append(start, reset, status);
+  actions.append(leftGroup);
+  panel.append(actions);
 
   if (wave.active) {
     if (wave.source === 'sila') start.textContent = 'Перезапустить волну';
@@ -600,11 +710,15 @@ async function startSilaWave() {
       toast('Не удалось собрать волну: добавьте треки в избранное или поищите что-нибудь');
       return;
     }
+    const limitedQueue = q.slice(0, MAX_QUEUE);
+    state.queue = limitedQueue;
+    state.queueIndex = 0;
+    state.fullSilaQueue = q;
     wave.active = true;
     wave.source = 'sila';
     wave.count = q.length;
     wave.name = null;
-    playQueue(q, 0);
+    await playCurrent();  
     const status = document.getElementById('sila-status');
     if (status) status.innerHTML = `Волна играет · <b>${q.length} треков</b>`;
     if (btn) btn.textContent = 'Перезапустить волну';
@@ -853,7 +967,6 @@ async function loadPlaylists() {
     head.className = 'view-head';
     const title = document.createElement('div');
     title.className = 'view-title';
-    title.style.marginBottom = '0';
     title.textContent = 'Плейлисты';
     const create = document.createElement('button');
     create.className = 'btn btn-primary';
@@ -1295,17 +1408,16 @@ function trackRow(track, index, list, opts = {}) {
 
   const pl = document.createElement('button');
   pl.className = 'pl-btn';
-  pl.textContent = '＋';
   pl.title = 'В плейлист';
+  pl.innerHTML = `<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M15 6H3v2h12V6zm0 4H3v2h12v-2zM3 16h8v-2H3v2zm10-5l7 4-7 4v-8z"/></svg>`;
   pl.dataset.id = track.id;
 
   const like = document.createElement('button');
   like.className = 'like-btn';
   const liked = state.liked.has(track.id);
-  like.textContent = liked ? '♥' : '♡';
-  like.classList.toggle('liked', liked);
-  like.dataset.id = track.id;
-  like.title = liked ? 'Убрать из избранного' : 'В избранное';
+  like.innerHTML = liked 
+    ? `<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>`
+    : `<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>`;
 
   const dur = document.createElement('span');
   dur.className = 'track-duration';
@@ -1361,14 +1473,18 @@ function syncLikeButtons() {
   const liked = state.liked;
   document.querySelectorAll('.like-btn[data-id]').forEach((b) => {
     const isLiked = liked.has(b.dataset.id);
-    b.textContent = isLiked ? '♥' : '♡';
+    b.innerHTML = isLiked 
+      ? `<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>`
+      : `<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>`;
     b.classList.toggle('liked', isLiked);
     b.title = isLiked ? 'Убрать из избранного' : 'В избранное';
   });
   const pb = $('#player-like');
   if (state.currentTrackId) {
     const isLiked = liked.has(state.currentTrackId);
-    pb.textContent = isLiked ? '♥' : '♡';
+    pb.innerHTML = isLiked 
+      ? `<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>`
+      : `<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>`;
     pb.classList.toggle('liked', isLiked);
   }
 }
@@ -1393,6 +1509,7 @@ async function playCurrent() {
   updatePlayerUI(track);
   discordStatus(track, true);
   highlightQueue();
+  saveLastState();
   let url = state.streams.get(track.id);
   if (!url) {
     try {
@@ -1484,6 +1601,13 @@ function highlightQueue() {
 
 function next() {
   if (!state.queue.length) return;
+  if (state.queueIndex >= state.queue.length - 2) {
+    if (wave.active && wave.source === 'sila') {
+      loadMoreSilaTracks();
+    } else {
+      loadMoreTracks();
+    }
+  }
   if (state.queueIndex < state.queue.length - 1) {
     state.queueIndex++;
     playCurrent();
@@ -1515,6 +1639,62 @@ function updatePlayBtn() {
 function togglePlay() {
   if (audio.paused) audio.play();
   else audio.pause();
+}
+
+audio.addEventListener('timeupdate', () => {
+  if (!audio.duration || !isFinite(audio.duration)) return;
+  const progress = (audio.currentTime / audio.duration) * 100;
+  $('#seek').value = progress;
+  $('#seek').style.setProperty('--progress', progress + '%');
+  $('#pos-current').textContent = fmtTime(audio.currentTime);
+  $('#pos-total').textContent = fmtTime(audio.duration);
+});
+
+audio.addEventListener('loadedmetadata', () => {
+  $('#pos-total').textContent = fmtTime(audio.duration);
+  $('#seek').style.setProperty('--progress', '0%');
+});
+
+audio.addEventListener('ended', next);
+audio.addEventListener('play', () => {
+  updatePlayBtn();
+  discordStatus(state.queue[state.queueIndex], true);
+});
+audio.addEventListener('pause', () => {
+  updatePlayBtn();
+  discordStatus(state.queue[state.queueIndex], false);
+});
+audio.addEventListener('error', () => {
+  toast('Ошибка воспроизведения');
+  updatePlayBtn();
+});
+
+$('#seek').addEventListener('input', () => {
+  if (audio.duration && isFinite(audio.duration)) {
+    audio.currentTime = (Number($('#seek').value) / 100) * audio.duration;
+  }
+});
+
+$('#volume').addEventListener('input', () => {
+  const v = Number($('#volume').value);
+  audio.volume = v / 100;
+  settings.volume = v;
+  saveSettings();
+  $('#volume').style.setProperty('--volume-progress', v + '%');
+});
+
+$('#volume').style.setProperty('--volume-progress', settings.volume + '%');
+
+if (navigator.mediaSession) {
+  const ms = navigator.mediaSession;
+  ms.setActionHandler('play', () => audio.play());
+  ms.setActionHandler('pause', () => audio.pause());
+  ms.setActionHandler('previoustrack', prev);
+  ms.setActionHandler('nexttrack', next);
+  ms.setActionHandler('stop', () => audio.pause());
+  ms.setActionHandler('seekto', (d) => {
+    if (d.seekTime != null) audio.currentTime = d.seekTime;
+  });
 }
 
 $('#btn-play').addEventListener('click', togglePlay);
@@ -1588,56 +1768,6 @@ function renderQueue() {
       closeQueue();
     });
     list.append(row);
-  });
-}
-
-audio.addEventListener('timeupdate', () => {
-  if (!audio.duration || !isFinite(audio.duration)) return;
-  $('#seek').value = (audio.currentTime / audio.duration) * 100;
-  $('#pos-current').textContent = fmtTime(audio.currentTime);
-  $('#pos-total').textContent = fmtTime(audio.duration);
-});
-
-audio.addEventListener('loadedmetadata', () => {
-  $('#pos-total').textContent = fmtTime(audio.duration);
-});
-
-audio.addEventListener('ended', next);
-audio.addEventListener('play', () => {
-  updatePlayBtn();
-  discordStatus(state.queue[state.queueIndex], true);
-});
-audio.addEventListener('pause', () => {
-  updatePlayBtn();
-  discordStatus(state.queue[state.queueIndex], false);
-});
-audio.addEventListener('error', () => {
-  toast('Ошибка воспроизведения');
-  updatePlayBtn();
-});
-
-$('#seek').addEventListener('input', () => {
-  if (audio.duration && isFinite(audio.duration)) {
-    audio.currentTime = (Number($('#seek').value) / 100) * audio.duration;
-  }
-});
-
-$('#volume').addEventListener('input', () => {
-  const v = Number($('#volume').value);
-  audio.volume = v / 100;
-  settings.volume = v;
-  saveSettings();
-});
-
-if (navigator.mediaSession) {
-  const ms = navigator.mediaSession;
-  ms.setActionHandler('play', () => audio.play());
-  ms.setActionHandler('pause', () => audio.pause());
-  ms.setActionHandler('previoustrack', prev);
-  ms.setActionHandler('nexttrack', next);
-  ms.setActionHandler('stop', () => audio.pause());
-  ms.setActionHandler('seekto', (d) => {
-    if (d.seekTime != null) audio.currentTime = d.seekTime;
   });
 }
 

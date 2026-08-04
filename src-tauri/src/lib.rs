@@ -17,6 +17,15 @@ pub struct AppState {
     pub shortcut_actions: Mutex<HashMap<u32, String>>,
     pub discord_tx: Mutex<Option<mpsc::Sender<discord::DiscordMsg>>>,
     pub hide_gen: AtomicU64,
+    pub last_activity: AtomicU64,
+    pub idle_low: AtomicBool,
+}
+
+pub(crate) fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
 }
 
 pub fn run() {
@@ -59,6 +68,8 @@ pub fn run() {
             shortcut_actions: Mutex::new(HashMap::new()),
             discord_tx: Mutex::new(Some(discord_tx)),
             hide_gen: AtomicU64::new(0),
+            last_activity: AtomicU64::new(now_ms()),
+            idle_low: AtomicBool::new(false),
         })
         .invoke_handler(tauri::generate_handler![
             commands::get_anonymous_token,
@@ -87,24 +98,34 @@ pub fn run() {
             commands::add_tracks_to_playlist,
             commands::update_playlist,
             commands::delete_playlist,
+            commands::user_active,
         ])
         .setup(|app| {
             commands::restore_session(app.handle());
             let _ = setup_tray(app.handle());
+            spawn_idle_monitor(app.handle());
             Ok(())
         })
         .on_window_event(|window, event| {
-            if let WindowEvent::CloseRequested { api, .. } = event {
-                let quitting = window
-                    .app_handle()
-                    .state::<AppState>()
-                    .quitting
-                    .load(Ordering::Relaxed);
-                if !quitting {
-                    api.prevent_close();
-                    let _ = window.hide();
-                    schedule_freeze(&window.app_handle());
+            match event {
+                WindowEvent::CloseRequested { api, .. } => {
+                    let quitting = window.app_handle().state::<AppState>().quitting.load(Ordering::Relaxed);
+                    if !quitting {
+                        api.prevent_close();
+                        let _ = window.hide();
+                        schedule_freeze(&window.app_handle());
+                    }
                 }
+                WindowEvent::Focused(focused) => {
+                    let app = window.app_handle();
+                    if *focused {
+                        app.state::<AppState>().last_activity.store(now_ms(), Ordering::Relaxed);
+                        set_soft_normal(&app);
+                    } else {
+                        set_soft_low(&app);
+                    }
+                }
+                _ => {}
             }
         })
         .run(tauri::generate_context!())
@@ -170,6 +191,8 @@ fn setup_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
 
 fn show_window(app: &tauri::AppHandle) {
     cancel_freeze(app);
+    app.state::<AppState>().last_activity.store(now_ms(), Ordering::Relaxed);
+    set_soft_normal(app);
     unfreeze_webview(app);
     if let Some(win) = app.get_webview_window("main") {
         let _ = win.show();
@@ -179,9 +202,10 @@ fn show_window(app: &tauri::AppHandle) {
 }
 
 const FREEZE_DELAY_SECS: u64 = 180;
+const IDLE_MS: u64 = 180_000;
 
 #[cfg(target_os = "windows")]
-fn freeze_webview(app: &tauri::AppHandle) {
+pub(crate) fn apply_memory_level(app: &tauri::AppHandle, low: bool) {
     use webview2_com::Microsoft::Web::WebView2::Win32::{
         COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL, ICoreWebView2_19,
     };
@@ -189,13 +213,13 @@ fn freeze_webview(app: &tauri::AppHandle) {
     if let Some(win) = app.get_webview_window("main") {
         let _ = win.with_webview(move |webview| {
             let controller = webview.controller();
+            let level = if low { 1 } else { 0 };
             // SAFETY: COM calls on a valid WebView2 controller handle.
             unsafe {
-                let _ = controller.SetIsVisible(false);
                 if let Ok(core) = controller.CoreWebView2() {
                     if let Ok(core) = core.cast::<ICoreWebView2_19>() {
                         let _ = core
-                            .SetMemoryUsageTargetLevel(COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL(1));
+                            .SetMemoryUsageTargetLevel(COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL(level));
                     }
                 }
             }
@@ -203,27 +227,35 @@ fn freeze_webview(app: &tauri::AppHandle) {
     }
 }
 
+#[cfg(not(target_os = "windows"))]
+pub(crate) fn apply_memory_level(_app: &tauri::AppHandle, _low: bool) {}
+
 #[cfg(target_os = "windows")]
-fn unfreeze_webview(app: &tauri::AppHandle) {
-    use webview2_com::Microsoft::Web::WebView2::Win32::{
-        COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL, ICoreWebView2_19,
-    };
-    use windows_core::Interface;
+fn freeze_webview(app: &tauri::AppHandle) {
     if let Some(win) = app.get_webview_window("main") {
         let _ = win.with_webview(move |webview| {
             let controller = webview.controller();
-            // SAFETY: COM calls on a valid WebView2 controller handle.
+            // SAFETY: COM call on a valid WebView2 controller handle.
             unsafe {
-                let _ = controller.SetIsVisible(true);
-                if let Ok(core) = controller.CoreWebView2() {
-                    if let Ok(core) = core.cast::<ICoreWebView2_19>() {
-                        let _ = core
-                            .SetMemoryUsageTargetLevel(COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL(0));
-                    }
-                }
+                let _ = controller.SetIsVisible(false);
             }
         });
     }
+    apply_memory_level(app, true);
+}
+
+#[cfg(target_os = "windows")]
+fn unfreeze_webview(app: &tauri::AppHandle) {
+    if let Some(win) = app.get_webview_window("main") {
+        let _ = win.with_webview(move |webview| {
+            let controller = webview.controller();
+            // SAFETY: COM call on a valid WebView2 controller handle.
+            unsafe {
+                let _ = controller.SetIsVisible(true);
+            }
+        });
+    }
+    apply_memory_level(app, false);
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -231,6 +263,38 @@ fn freeze_webview(_app: &tauri::AppHandle) {}
 
 #[cfg(not(target_os = "windows"))]
 fn unfreeze_webview(_app: &tauri::AppHandle) {}
+
+fn set_soft_low(app: &tauri::AppHandle) {
+    app.state::<AppState>().idle_low.store(true, Ordering::Relaxed);
+    apply_memory_level(app, true);
+}
+
+fn set_soft_normal(app: &tauri::AppHandle) {
+    app.state::<AppState>().idle_low.store(false, Ordering::Relaxed);
+    apply_memory_level(app, false);
+}
+
+fn spawn_idle_monitor(app: &tauri::AppHandle) {
+    let app = app.clone();
+    std::thread::spawn(move || loop {
+        std::thread::sleep(std::time::Duration::from_secs(2));
+        let state = app.state::<AppState>();
+        let visible = app
+            .get_webview_window("main")
+            .and_then(|w| w.is_visible().ok())
+            .unwrap_or(false);
+        if !visible {
+            state.idle_low.store(false, Ordering::Relaxed);
+            continue;
+        }
+        let idle = now_ms().saturating_sub(state.last_activity.load(Ordering::Relaxed)) >= IDLE_MS;
+        if idle != state.idle_low.load(Ordering::Relaxed) {
+            state.idle_low.store(idle, Ordering::Relaxed);
+            let app2 = app.clone();
+            let _ = app.run_on_main_thread(move || apply_memory_level(&app2, idle));
+        }
+    });
+}
 
 fn schedule_freeze(app: &tauri::AppHandle) {
     let gen = app

@@ -6,7 +6,7 @@ use tauri::{AppHandle, Manager, State};
 use crate::api::ZvukApi;
 use crate::discord::{self, DiscordMsg};
 use crate::store;
-use crate::AppState;
+use crate::{now_ms, AppState};
 
 fn api_from_state(state: &State<'_, AppState>) -> Result<ZvukApi, String> {
     state
@@ -280,5 +280,17 @@ pub fn restore_session(app: &AppHandle) {
     if let Some(token) = store::load() {
         let api = ZvukApi::new(token);
         *app.state::<AppState>().api.lock().unwrap() = Some(api);
+    }
+}
+
+use std::sync::atomic::Ordering;
+
+#[tauri::command]
+pub fn user_active(app: AppHandle) {
+    let state = app.state::<AppState>();
+    state.last_activity.store(now_ms(), Ordering::Relaxed);
+    if state.idle_low.swap(false, Ordering::Relaxed) {
+        let a = app.clone();
+        let _ = app.run_on_main_thread(move || crate::apply_memory_level(&a, false));
     }
 }

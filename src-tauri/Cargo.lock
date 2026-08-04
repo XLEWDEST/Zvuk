@@ -5475,7 +5475,7 @@ dependencies = [
 
 [[package]]
 name = "zvuk"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "discord-rich-presence",
  "keyring",
