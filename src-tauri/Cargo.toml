@@ -1,6 +1,6 @@
 [package]
 name = "zvuk"
-version = "0.1.0"
+version = "0.1.2"
 description = "Десктоп-клиент музыкального сервиса Звук"
 authors = ["Zvuk Desktop"]
 edition = "2021"
@@ -23,6 +23,11 @@ tauri-plugin-opener = "2"
 tauri-plugin-global-shortcut = "2"
 tauri-plugin-single-instance = "2"
 discord-rich-presence = "0.2"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+wry = "0.55"
+webview2-com = "0.38"
+windows-core = "0.61"
 
 [profile.release]
 codegen-units = 1

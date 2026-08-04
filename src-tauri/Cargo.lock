@@ -5475,7 +5475,7 @@ dependencies = [
 
 [[package]]
 name = "zvuk"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "discord-rich-presence",
  "keyring",
@@ -5488,4 +5488,7 @@ dependencies = [
  "tauri-plugin-opener",
  "tauri-plugin-single-instance",
  "tokio",
+ "webview2-com",
+ "windows-core 0.61.2",
+ "wry",
 ]

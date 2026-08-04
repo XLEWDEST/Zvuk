@@ -4,7 +4,7 @@ mod discord;
 mod store;
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{mpsc, Mutex};
 
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
@@ -16,6 +16,7 @@ pub struct AppState {
     pub quitting: AtomicBool,
     pub shortcut_actions: Mutex<HashMap<u32, String>>,
     pub discord_tx: Mutex<Option<mpsc::Sender<discord::DiscordMsg>>>,
+    pub hide_gen: AtomicU64,
 }
 
 pub fn run() {
@@ -23,6 +24,8 @@ pub fn run() {
     discord::spawn_worker(discord_rx);
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            cancel_freeze(app);
+            unfreeze_webview(app);
             if let Some(win) = app.get_webview_window("main") {
                 let _ = win.show();
                 let _ = win.unminimize();
@@ -55,6 +58,7 @@ pub fn run() {
             quitting: AtomicBool::new(false),
             shortcut_actions: Mutex::new(HashMap::new()),
             discord_tx: Mutex::new(Some(discord_tx)),
+            hide_gen: AtomicU64::new(0),
         })
         .invoke_handler(tauri::generate_handler![
             commands::get_anonymous_token,
@@ -99,6 +103,7 @@ pub fn run() {
                 if !quitting {
                     api.prevent_close();
                     let _ = window.hide();
+                    schedule_freeze(&window.app_handle());
                 }
             }
         })
@@ -164,9 +169,89 @@ fn setup_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
 }
 
 fn show_window(app: &tauri::AppHandle) {
+    cancel_freeze(app);
+    unfreeze_webview(app);
     if let Some(win) = app.get_webview_window("main") {
         let _ = win.show();
         let _ = win.unminimize();
         let _ = win.set_focus();
     }
+}
+
+const FREEZE_DELAY_SECS: u64 = 180;
+
+#[cfg(target_os = "windows")]
+fn freeze_webview(app: &tauri::AppHandle) {
+    use webview2_com::Microsoft::Web::WebView2::Win32::{
+        COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL, ICoreWebView2_19,
+    };
+    use windows_core::Interface;
+    if let Some(win) = app.get_webview_window("main") {
+        let _ = win.with_webview(move |webview| {
+            let controller = webview.controller();
+            // SAFETY: COM calls on a valid WebView2 controller handle.
+            unsafe {
+                let _ = controller.SetIsVisible(false);
+                if let Ok(core) = controller.CoreWebView2() {
+                    if let Ok(core) = core.cast::<ICoreWebView2_19>() {
+                        let _ = core
+                            .SetMemoryUsageTargetLevel(COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL(1));
+                    }
+                }
+            }
+        });
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn unfreeze_webview(app: &tauri::AppHandle) {
+    use webview2_com::Microsoft::Web::WebView2::Win32::{
+        COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL, ICoreWebView2_19,
+    };
+    use windows_core::Interface;
+    if let Some(win) = app.get_webview_window("main") {
+        let _ = win.with_webview(move |webview| {
+            let controller = webview.controller();
+            // SAFETY: COM calls on a valid WebView2 controller handle.
+            unsafe {
+                let _ = controller.SetIsVisible(true);
+                if let Ok(core) = controller.CoreWebView2() {
+                    if let Ok(core) = core.cast::<ICoreWebView2_19>() {
+                        let _ = core
+                            .SetMemoryUsageTargetLevel(COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL(0));
+                    }
+                }
+            }
+        });
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn freeze_webview(_app: &tauri::AppHandle) {}
+
+#[cfg(not(target_os = "windows"))]
+fn unfreeze_webview(_app: &tauri::AppHandle) {}
+
+fn schedule_freeze(app: &tauri::AppHandle) {
+    let gen = app
+        .state::<AppState>()
+        .hide_gen
+        .fetch_add(1, Ordering::Relaxed)
+        + 1;
+    let app = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_secs(FREEZE_DELAY_SECS));
+        let app2 = app.clone();
+        let _ = app.run_on_main_thread(move || {
+            if app2.state::<AppState>().hide_gen.load(Ordering::Relaxed) == gen {
+                freeze_webview(&app2);
+            }
+        });
+    });
+}
+
+fn cancel_freeze(app: &tauri::AppHandle) {
+    app.state::<AppState>()
+        .hide_gen
+        .fetch_add(1, Ordering::Relaxed);
 }
