@@ -18,7 +18,7 @@ jobs:
           - os: ubuntu-22.04
             args: --bundles deb,appimage
           - os: windows-latest
-            args: --bundles nsis
+            args: --bundles msi
           - os: macos-latest
             args: --bundles app,dmg
     runs-on: ${{ matrix.platform.os }}
@@ -60,13 +60,29 @@ jobs:
       - name: Install frontend dependencies
         run: npm install
 
-      - name: Build and publish
+      - name: Build bundle
         uses: tauri-apps/tauri-action@v0
+        with:
+          args: ${{ matrix.platform.args }}
+
+      - name: Set version and rename installers
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION=$(sed -nE 's/^version = "([^"]+)"/\1/p' src-tauri/Cargo.toml)
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          mkdir -p artifacts
+          cd src-tauri/target/release/bundle
+          find . -type f \( -name '*.msi' -o -name '*.deb' -o -name '*.AppImage' -o -name '*.dmg' \) | while read -r f; do
+            ext="${f##*.}"
+            cp "$f" "../../../../artifacts/Zvuk_${VERSION}.${ext}"
+          done
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          args: ${{ matrix.platform.args }}
-          tagName: v__VERSION__
-          releaseName: "Звук v__VERSION__"
-          releaseDraft: true
-          prerelease: true
+          tag_name: v${{ env.VERSION }}
+          name: "Звук v${{ env.VERSION }}"
+          files: artifacts/Zvuk_*

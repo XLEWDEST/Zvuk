@@ -37,7 +37,7 @@ const state = {
 const wave = { active: false, source: null, count: 0, name: null };
 let hls = null;
 
-/* ---------------- settings ---------------- */
+
 
 const MAX_QUEUE = 10;
 
@@ -45,6 +45,8 @@ const defaultSettings = {
   volume: 80,
   hifi: false,
   discordRpc: true,
+  repeat: 'off',
+  shuffle: false,
   hotkeys: {
     playPause: null,
     prev: null,
@@ -74,13 +76,8 @@ const LAST_KEY = 'zvuk.lastTrack';
 
 function saveLastState() {
   try {
-    localStorage.setItem(
-      LAST_KEY,
-      JSON.stringify({ q: state.queue, i: state.queueIndex })
-    );
-  } catch (e) {
-    /* ignore */
-  }
+    localStorage.setItem(LAST_KEY, JSON.stringify({ q: state.queue, i: state.queueIndex }));
+  } catch (e) {}
 }
 
 function restoreLastState() {
@@ -97,7 +94,7 @@ function restoreLastState() {
     discordStatus(track, false);
     highlightQueue();
   } catch (e) {
-    /* ignore */
+    
   }
 }
 
@@ -105,7 +102,7 @@ function applyHotkeys() {
   invoke('set_hotkeys', { hotkeys: settings.hotkeys }).catch(() => {});
 }
 
-/* ---------------- helpers ---------------- */
+
 
 function fmtTime(sec) {
   if (!isFinite(sec) || sec < 0) sec = 0;
@@ -179,7 +176,7 @@ function toast(msg, ok = false) {
   toastTimer = setTimeout(() => el.classList.add('hidden'), 3200);
 }
 
-/* ---------------- auth ---------------- */
+
 
 function setLoginStatus(msg, ok = false) {
   const el = $('#login-status');
@@ -204,23 +201,10 @@ async function enterApp() {
     const ids = ((d && d.collection && d.collection.tracks) || []).map((t) => t.id).filter(Boolean);
     state.liked = new Set(ids);
   } catch (e) {
-    /* ignore */
+    
   }
   restoreLastState();
   showView('home');
-}
-
-function addToQueue(track) {
-  if (state.queue.some(t => t.id === track.id)) return;
-  state.queue.push(track);
-  if (state.queue.length > MAX_QUEUE) {
-    if (state.queueIndex > 0) {
-      state.queue.shift();
-      state.queueIndex--;
-    } else {
-      state.queue.pop();
-    }
-  }
 }
 
 async function loadMoreTracks() {
@@ -242,7 +226,7 @@ async function loadMoreTracks() {
         state.queue.pop();
       }
     }
-  } catch (e) { /* ignore */ }
+  } catch (e) {  }
 }
 
 async function loadMoreSilaTracks() {
@@ -276,7 +260,7 @@ async function init() {
       return;
     }
   } catch (e) {
-    /* no session */
+    
   }
   showLogin();
 }
@@ -307,18 +291,9 @@ async function logout() {
   try {
     await invoke('clear_token');
   } catch (e) {
-    /* ignore */
+    
   }
   invoke('discord_clear').catch(() => {});
-  state.queue = [];
-  state.queueIndex = -1;
-  state.streams.clear();
-  state.currentTrackId = null;
-  state.liked = new Set();
-  wave.active = false;
-  wave.source = null;
-  wave.count = 0;
-  wave.name = null;
   if (hls) {
     hls.destroy();
     hls = null;
@@ -333,7 +308,7 @@ async function logout() {
   showLogin();
 }
 
-/* ---------------- tray events ---------------- */
+
 
 if (window.__TAURI__ && window.__TAURI__.event) {
   window.__TAURI__.event.listen('tray-play-pause', () => togglePlay());
@@ -348,7 +323,7 @@ if (window.__TAURI__ && window.__TAURI__.event) {
   });
 }
 
-/* ---------------- views ---------------- */
+
 
 document.querySelectorAll('.nav-item').forEach((item) => {
   item.addEventListener('click', () => {
@@ -427,7 +402,7 @@ function section(title, count) {
   return s;
 }
 
-/* ---------------- home / Сила звука ---------------- */
+
 
 const GENRES = ['Поп', 'Рок', 'Хип-хоп', 'Электроника', 'Джаз', 'Классика', 'Лоу-фай', 'Инди', 'Танцевальная'];
 
@@ -464,7 +439,7 @@ async function renderHome() {
       aGrid.append(p);
     }
   } catch (e) {
-    /* ignore */
+    
   }
 }
 
@@ -490,18 +465,6 @@ function silaPanel() {
   controls.append(silaSlider('sila-energy', 'Энергичность', 'спокойная', 'энергичная', 50));
   controls.append(silaSlider('sila-mood', 'Настроение', 'грустная', 'весёлая', 50));
   controls.append(silaSlider('sila-pop', 'Популярность', 'редкая', 'хиты', 50));
-
-  const langBlock = document.createElement('div');
-  langBlock.className = 'sila-slider';
-  const llabel = document.createElement('label');
-  llabel.innerHTML = '<span>Язык</span>';
-  const sel = document.createElement('select');
-  sel.className = 'sila-select';
-  sel.id = 'sila-lang';
-  sel.innerHTML =
-    '<option value="any">Любой</option><option value="ru">Русский</option><option value="en">Английский</option>';
-  langBlock.append(llabel, sel);
-  controls.append(langBlock);
 
   const genreBlock = document.createElement('div');
   genreBlock.className = 'sila-slider';
@@ -614,15 +577,11 @@ function artistWaveCard(a) {
   return card;
 }
 
-/* ---------------- wave logic ---------------- */
+
 
 function silaVal(id, fallback) {
   const el = document.getElementById(id);
   return el ? Number(el.value) : fallback;
-}
-function silaLang() {
-  const el = document.getElementById('sila-lang');
-  return el ? el.value : 'any';
 }
 
 async function generateSilaQueue() {
@@ -648,7 +607,7 @@ async function generateSilaQueue() {
       const tr = await invoke('get_tracks', { ids: likedIds.slice(0, 60) });
       ((tr && tr.getTracks) || []).forEach((t) => add(t, 'like'));
     } catch (e) {
-      /* ignore */
+      
     }
   }
 
@@ -659,7 +618,7 @@ async function generateSilaQueue() {
         ((a && a.popularTracks) || []).forEach((t) => add(t, 'artist'))
       );
     } catch (e) {
-      /* ignore */
+      
     }
   }
 
@@ -676,19 +635,11 @@ async function generateSilaQueue() {
       const s = await invoke('search', { query: q, limit: 8 });
       ((s && s.search && s.search.tracks && s.search.tracks.items) || []).forEach((t) => add(t, 'other'));
     } catch (e) {
-      /* ignore */
+      
     }
   }
 
-  const lang = silaLang();
   let result = pool;
-  if (lang !== 'any') {
-    result = pool.filter((t) => {
-      const text = ((t.title || '') + ' ' + artistString(t)).toLowerCase();
-      const hasCyr = /[а-яё]/.test(text);
-      return lang === 'ru' ? hasCyr : !hasCyr;
-    });
-  }
 
   const pop = silaVal('sila-pop', 50);
   const likedOnly = result.filter((t) => t._src === 'like');
@@ -739,11 +690,11 @@ function resetSila() {
   $('#sila-energy').value = 50;
   $('#sila-mood').value = 50;
   $('#sila-pop').value = 50;
-  $('#sila-lang').value = 'any';
   $('#sila-energy-val').textContent = '50';
   $('#sila-mood-val').textContent = '50';
   $('#sila-pop-val').textContent = '50';
   state.silaGenres = [];
+  state.fullSilaQueue = [];
   document.querySelectorAll('.chip.on').forEach((c) => c.classList.remove('on'));
   const start = $('#sila-start');
   if (start) start.textContent = 'Запустить волну';
@@ -778,7 +729,7 @@ async function startArtistWave(artistId, name) {
           }
         });
       } catch (e) {
-        /* synthesis может быть недоступен */
+        
       }
     }
     if (!tracks.length) {
@@ -806,7 +757,7 @@ function regenerateWave() {
   }
 }
 
-/* ---------------- search ---------------- */
+
 
 function doSearch(query) {
   clearTimeout(state.searchTimer);
@@ -887,7 +838,7 @@ function renderSearchResults(data) {
   }
 }
 
-/* ---------------- library & playlists ---------------- */
+
 
 async function loadLibrary() {
   const content = $('#content');
@@ -991,7 +942,7 @@ async function loadPlaylists() {
   }
 }
 
-/* ---------------- playlist modal ---------------- */
+
 
 let modalState = { track: null };
 
@@ -1096,7 +1047,7 @@ $('#playlist-modal').addEventListener('click', (e) => {
   if (e.target.id === 'playlist-modal') closeModal();
 });
 
-/* ---------------- detail views ---------------- */
+
 
 async function openPlaylist(id) {
   const content = $('#content');
@@ -1224,7 +1175,7 @@ async function removeFromPlaylist(playlist, track) {
   }
 }
 
-/* ---------------- artist page ---------------- */
+
 
 async function openArtist(id) {
   const content = $('#content');
@@ -1316,7 +1267,7 @@ async function openArtist(id) {
   }
 }
 
-/* ---------------- cards ---------------- */
+
 
 function playlistCard(p) {
   const card = document.createElement('div');
@@ -1372,7 +1323,7 @@ function artistCard(a) {
   return card;
 }
 
-/* ---------------- track list ---------------- */
+
 
 function renderTrackList(tracks, container, opts = {}) {
   const list = document.createElement('div');
@@ -1450,7 +1401,7 @@ function trackRow(track, index, list, opts = {}) {
   return row;
 }
 
-/* ---------------- likes ---------------- */
+
 
 async function toggleLike(track, btn) {
   const id = track.id;
@@ -1489,7 +1440,7 @@ function syncLikeButtons() {
   }
 }
 
-/* ---------------- player ---------------- */
+
 
 async function playQueue(list, index) {
   const track = list[index];
@@ -1530,7 +1481,16 @@ async function playCurrent() {
     return;
   }
   setupSource(url);
-  audio.play().then(updatePlayBtn).catch(() => toast('Не удалось начать воспроизведение'));
+  
+  if (audio.paused) {
+    try {
+      await audio.play();
+    } catch (e) {
+      if (e.name !== 'AbortError') {
+        toast('Не удалось начать воспроизведение');
+      }
+    }
+  }
   updatePlayBtn();
 }
 
@@ -1601,6 +1561,15 @@ function highlightQueue() {
 
 function next() {
   if (!state.queue.length) return;
+  if (settings.shuffle && state.queue.length > 1) {
+    const prevIdx = state.queueIndex;
+    state.queueIndex = Math.floor(Math.random() * state.queue.length);
+    if (state.queueIndex === prevIdx) {
+      state.queueIndex = (state.queueIndex + 1) % state.queue.length;
+    }
+    playCurrent();
+    return;
+  }
   if (state.queueIndex >= state.queue.length - 2) {
     if (wave.active && wave.source === 'sila') {
       loadMoreSilaTracks();
@@ -1613,9 +1582,13 @@ function next() {
     playCurrent();
   } else if (wave.active) {
     regenerateWave();
-  } else {
+  } else if (settings.repeat === 'all') {
     state.queueIndex = 0;
     playCurrent();
+  } else {
+    audio.pause();
+    audio.currentTime = 0;
+    updatePlayBtn();
   }
 }
 
@@ -1631,14 +1604,57 @@ function prev() {
 }
 
 function updatePlayBtn() {
-  const btn = $('#btn-play');
   const playing = !audio.paused;
-  btn.textContent = playing ? '❚❚' : '▶';
+  const playIcon = document.querySelector('#play-icon');
+  const pauseIcon = document.querySelector('#pause-icon');
+  
+  if (playing) {
+    playIcon.style.display = 'none';
+    pauseIcon.style.display = 'block';
+  } else {
+    playIcon.style.display = 'block';
+    pauseIcon.style.display = 'none';
+  }
 }
 
 function togglePlay() {
-  if (audio.paused) audio.play();
-  else audio.pause();
+  if (audio.paused) {
+    audio.play().catch(e => {
+      if (e.name !== 'AbortError') {
+        toast('Не удалось начать воспроизведение');
+      }
+    });
+  } else {
+    audio.pause();
+  }
+}
+
+function toggleRepeat() {
+  const order = ['off', 'all', 'one'];
+  const i = order.indexOf(settings.repeat);
+  settings.repeat = order[(i + 1) % order.length];
+  saveSettings();
+  updateRepeatBtn();
+}
+
+function toggleShuffle() {
+  settings.shuffle = !settings.shuffle;
+  saveSettings();
+  updateShuffleBtn();
+}
+
+function updateRepeatBtn() {
+  const btn = $('#btn-repeat');
+  btn.classList.toggle('active', settings.repeat !== 'off');
+  btn.classList.toggle('repeat-one', settings.repeat === 'one');
+  const titles = { off: 'Повтор выключен', all: 'Повтор всего', one: 'Повтор трека' };
+  btn.title = titles[settings.repeat];
+}
+
+function updateShuffleBtn() {
+  const btn = $('#btn-shuffle');
+  btn.classList.toggle('active', settings.shuffle);
+  btn.title = settings.shuffle ? 'Случайное: вкл' : 'Случайное воспроизведение';
 }
 
 audio.addEventListener('timeupdate', () => {
@@ -1655,7 +1671,14 @@ audio.addEventListener('loadedmetadata', () => {
   $('#seek').style.setProperty('--progress', '0%');
 });
 
-audio.addEventListener('ended', next);
+audio.addEventListener('ended', () => {
+  if (settings.repeat === 'one' && state.queue[state.queueIndex]) {
+    audio.currentTime = 0;
+    audio.play().catch(() => {});
+    return;
+  }
+  next();
+});
 audio.addEventListener('play', () => {
   updatePlayBtn();
   discordStatus(state.queue[state.queueIndex], true);
@@ -1700,6 +1723,10 @@ if (navigator.mediaSession) {
 $('#btn-play').addEventListener('click', togglePlay);
 $('#btn-next').addEventListener('click', next);
 $('#btn-prev').addEventListener('click', prev);
+$('#btn-repeat').addEventListener('click', toggleRepeat);
+$('#btn-shuffle').addEventListener('click', toggleShuffle);
+updateRepeatBtn();
+updateShuffleBtn();
 
 $('#player-like').addEventListener('click', () => {
   const track = state.queue[state.queueIndex];
@@ -1771,7 +1798,7 @@ function renderQueue() {
   });
 }
 
-/* ---------------- settings / hotkeys ---------------- */
+
 
 const HOTKEY_ACTIONS = [
   { key: 'playPause', name: 'Пауза / Плей' },

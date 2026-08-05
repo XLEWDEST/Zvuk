@@ -1,5 +1,5 @@
 :root {
-  /* Палитра темной темы уровня Spotify / Apple Music Premium */
+  
   --bg-base: #090a10;
   --bg-surface: rgba(18, 21, 31, 0.75);
   --bg-surface-hover: rgba(30, 35, 52, 0.85);
@@ -71,7 +71,7 @@ body {
   display: none !important;
 }
 
-/* ---------- Login View ---------- */
+
 
 .login-view {
   height: 100vh;
@@ -87,7 +87,7 @@ body {
 .login-card {
   width: 440px;
   max-width: 100%;
-  background: rgba(22, 26, 38, 0.7);
+  background: transparent;
   backdrop-filter: blur(24px);
   -webkit-backdrop-filter: blur(24px);
   border: var(--glass-border);
@@ -103,6 +103,22 @@ body {
 @keyframes fadeIn {
   from { opacity: 0; transform: translateY(12px); }
   to { opacity: 1; transform: translateY(0); }
+}
+
+.login-footer-link {
+    position: absolute;
+    bottom: 10px;
+    right: 10px;
+    font-size: 12px;
+    color: #666;
+    opacity: 0.7;
+    text-decoration: none;
+    transition: opacity 0.2s ease;
+}
+
+.login-footer-link:hover {
+    opacity: 1;
+    color: #7c7c7c;
 }
 
 .brand {
@@ -243,7 +259,7 @@ body {
   color: var(--accent);
 }
 
-/* ---------- Buttons ---------- */
+
 
 .btn {
   padding: 10px 18px;
@@ -315,7 +331,30 @@ body {
   width: 100%;
 }
 
-/* ---------- Layout & Sidebar ---------- */
+#btn-play {
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  margin: 0;
+}
+
+#btn-play svg {
+  display: block;
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  position: relative;
+}
+
+#pause-icon, #play-icon {
+  left: 0px;
+  top: 0px;
+}
+
+
 
 .app {
   display: flex;
@@ -400,7 +439,7 @@ body {
   padding: 8px;
 }
 
-/* ---------- Main & Topbar ---------- */
+
 
 .main {
   margin-left: calc(var(--sidebar-w) + 32px);
@@ -479,7 +518,7 @@ body {
   to { transform: translateY(-50%) rotate(360deg); }
 }
 
-/* ---------- Content Section ---------- */
+
 
 .content {
   background: transparent;
@@ -575,7 +614,7 @@ body {
   margin-bottom: 0;
 }
 
-/* ---------- Track List ---------- */
+
 
 .track-list {
   display: flex;
@@ -712,7 +751,7 @@ body {
   transform: scale(1.3);
 }
 
-/* ---------- Cards & Grids ---------- */
+
 
 .card-grid {
   display: grid;
@@ -769,7 +808,7 @@ body {
   text-overflow: ellipsis;
 }
 
-/* ---------- Detail View ---------- */
+
 
 .detail-header {
   display: flex;
@@ -822,7 +861,7 @@ body {
   margin-top: 16px;
 }
 
-/* ---------- Bottom Player ---------- */
+
 
 .player {
   position: fixed;
@@ -894,6 +933,65 @@ body {
   max-width: 600px;
 }
 
+#player-download {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#player-download svg {
+  width: 18px;
+  height: 18px;
+  display: block;
+  flex-shrink: 0;
+  position: relative;
+  left: 0px;
+  top: 0px;
+}
+
+#player-add-playlist {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#player-add-playlist svg {
+  width: 22px;
+  height: 22px;
+  display: block;
+  flex-shrink: 0;
+  position: relative;
+  left: 2px;
+  top: 1px;
+}
+
+#btn-prev,
+#btn-next {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#btn-prev svg {
+  width: 22px;
+  height: 22px;
+  display: block;
+  flex-shrink: 0;
+  position: relative;
+  left: 0px;
+  top: 0px;
+}
+
+#btn-next svg {
+  width: 22px;
+  height: 22px;
+  display: block;
+  flex-shrink: 0;
+  position: relative;
+  left: 0px;
+  top: 0px;
+}
+
 .player-buttons {
   display: flex;
   align-items: center;
@@ -933,6 +1031,64 @@ body {
 }
 
 .player-btn.liked {
+  color: var(--accent);
+}
+
+.player-btn.active {
+  color: var(--accent);
+}
+
+#btn-shuffle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#btn-shuffle svg {
+  width: 18px;
+  height: 18px;
+  display: block;
+  flex-shrink: 0;
+  position: relative;
+  left: 0px;
+  top: 0px;
+}
+
+#btn-repeat {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#btn-repeat svg {
+  width: 18px;
+  height: 18px;
+  display: block;
+  flex-shrink: 0;
+  position: relative;
+  left: 0px;
+  top: 0px;
+}
+
+#btn-repeat.repeat-one::after {
+  content: '1';
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #031c15;
+  font-size: 10px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+#btn-shuffle.active {
   color: var(--accent);
 }
 
@@ -1034,7 +1190,7 @@ body {
   box-shadow: 0 0 10px var(--accent);
 }
 
-/* Firefox */
+
 #volume::-moz-range-track {
   height: 4px;
   border-radius: 2px;
@@ -1143,7 +1299,7 @@ input[type="range"]:hover::-webkit-slider-thumb {
   box-shadow: 0 0 10px var(--accent);
 }
 
-/* Firefox */
+
 #seek::-moz-range-track {
   height: 4px;
   border-radius: 2px;
@@ -1178,7 +1334,7 @@ input[type="range"]:hover::-webkit-slider-thumb {
   background-repeat: no-repeat;
 }
 
-/* ---------- Sila Zvuka (Wave Panel) ---------- */
+
 
 .sila-panel {
   background: linear-gradient(135deg, rgba(112, 0, 255, 0.07) 0%, rgba(22, 224, 168, 0.04) 100%);
@@ -1293,23 +1449,6 @@ input[type="range"]:hover::-webkit-slider-thumb {
   box-shadow: 0 0 12px var(--accent-soft);
 }
 
-.sila-select {
-  width: 100%;
-  padding: 10px 14px;
-  background: rgba(0, 0, 0, 0.3);
-  border: var(--glass-border);
-  border-radius: var(--radius);
-  color: var(--text);
-  font-size: 13px;
-  outline: none;
-  cursor: pointer;
-  transition: var(--transition);
-}
-
-.sila-select:focus {
-  border-color: var(--accent);
-}
-
 .sila-actions {
   display: flex;
   gap: 12px;
@@ -1333,7 +1472,7 @@ input[type="range"]:hover::-webkit-slider-thumb {
   color: var(--accent);
 }
 
-/* Artist Waves Cards */
+
 .artist-wave-card {
   position: relative;
 }
@@ -1375,7 +1514,7 @@ input[type="range"]:hover::-webkit-slider-thumb {
   background: #1bf2b8;
 }
 
-/* ---------- Queue Panel ---------- */
+
 
 .queue-panel {
   position: fixed;
@@ -1479,7 +1618,7 @@ input[type="range"]:hover::-webkit-slider-thumb {
   padding: 32px 16px;
 }
 
-/* ---------- Settings View ---------- */
+
 
 .settings-body {
   display: flex;
@@ -1572,7 +1711,7 @@ input[type="range"]:hover::-webkit-slider-thumb {
   box-shadow: 0 0 12px var(--accent-soft);
 }
 
-/* ---------- Modal ---------- */
+
 
 .modal-overlay {
   position: fixed;
@@ -1672,7 +1811,7 @@ input[type="range"]:hover::-webkit-slider-thumb {
   border-color: var(--accent);
 }
 
-/* ---------- Toast Notifications ---------- */
+
 
 .toast {
   position: fixed;
@@ -1693,7 +1832,7 @@ input[type="range"]:hover::-webkit-slider-thumb {
   animation: fadeIn 0.2s ease-out;
 }
 
-/* ---------- Scrollbars ---------- */
+
 
 ::-webkit-scrollbar {
   width: 8px;
