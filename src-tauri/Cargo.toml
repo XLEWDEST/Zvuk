@@ -1,6 +1,6 @@
 [package]
 name = "zvuk"
-version = "1.1.4"
+version = "1.0.0"
 description = "Десктоп-клиент музыкального сервиса Звук"
 authors = ["Zvuk Desktop"]
 edition = "2021"
