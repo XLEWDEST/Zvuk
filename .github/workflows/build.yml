@@ -29,7 +29,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       - name: Setup Rust
@@ -70,13 +70,38 @@ jobs:
         run: |
           set -euo pipefail
           VERSION=$(sed -nE 's/^version = "([^"]+)"/\1/p' src-tauri/Cargo.toml)
-          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
           mkdir -p artifacts
           cd src-tauri/target/release/bundle
           find . -type f \( -name '*.msi' -o -name '*.deb' -o -name '*.AppImage' -o -name '*.dmg' \) | while read -r f; do
             ext="${f##*.}"
             cp "$f" "../../../../artifacts/Zvuk_${VERSION}.${ext}"
           done
+
+      - name: Upload installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: installers-${{ matrix.platform.os }}
+          path: artifacts
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Compute version
+        shell: bash
+        run: |
+          VERSION=$(sed -nE 's/^version = "([^"]+)"/\1/p' src-tauri/Cargo.toml)
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+
+      - name: Download installers
+        uses: actions/download-artifact@v4
+        with:
+          path: download
+          merge-multiple: true
 
       - name: Create release
         uses: softprops/action-gh-release@v2
@@ -85,4 +110,4 @@ jobs:
         with:
           tag_name: v${{ env.VERSION }}
           name: "Звук v${{ env.VERSION }}"
-          files: artifacts/Zvuk_*
+          files: download/Zvuk_*
