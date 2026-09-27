@@ -807,8 +807,12 @@ mod tests {
 
     #[tokio::test]
     async fn playlist_flow() {
-        let Some(token) = crate::store::load() else {
-            println!("no saved token; skip playlist_flow");
+        let Some(token) = std::env::var("ZVUK_TEST_TOKEN")
+            .ok()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+        else {
+            println!("no ZVUK_TEST_TOKEN; skip playlist_flow");
             return;
         };
         let api = ZvukApi::new(token);

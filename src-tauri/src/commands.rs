@@ -23,14 +23,18 @@ pub async fn get_anonymous_token() -> Result<String, String> {
 }
 
 #[tauri::command]
-pub async fn set_token(state: State<'_, AppState>, token: String) -> Result<Value, String> {
+pub async fn set_token(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    token: String,
+) -> Result<Value, String> {
     let token = token.trim().to_string();
     if token.is_empty() {
         return Err("Токен не должен быть пустым".into());
     }
     let api = ZvukApi::new(token.clone());
     api.verify().await.map_err(|e| e.to_string())?;
-    store::save(&token)?;
+    store::save(&app, &token)?;
     *state.api.lock().unwrap() = Some(api);
     Ok(json!({ "ok": true }))
 }
@@ -42,13 +46,13 @@ pub async fn verify_session(state: State<'_, AppState>) -> Result<Value, String>
 }
 
 #[tauri::command]
-pub fn saved_token_exists() -> bool {
-    store::load().is_some()
+pub fn saved_token_exists(app: AppHandle) -> bool {
+    store::load(&app).is_some()
 }
 
 #[tauri::command]
-pub fn clear_token(state: State<'_, AppState>) -> Result<(), String> {
-    store::clear()?;
+pub fn clear_token(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    store::clear(&app)?;
     *state.api.lock().unwrap() = None;
     Ok(())
 }
@@ -277,7 +281,7 @@ pub async fn delete_playlist(
 }
 
 pub fn restore_session(app: &AppHandle) {
-    if let Some(token) = store::load() {
+    if let Some(token) = store::load(app) {
         let api = ZvukApi::new(token);
         *app.state::<AppState>().api.lock().unwrap() = Some(api);
     }

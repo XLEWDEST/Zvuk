@@ -1,20 +1,14 @@
 const { invoke } = window.__TAURI__.core;
 const opener = window.__TAURI__.opener;
 
-let _actEmitting = false;
+let activityTimer;
 ['mousemove', 'click', 'keydown', 'wheel', 'touchstart'].forEach((evt) => {
-  document.addEventListener(
-    evt,
-    () => {
-      if (_actEmitting) return;
-      _actEmitting = true;
-      setTimeout(() => {
-        _actEmitting = false;
-        invoke('user_active').catch(() => {});
-      }, 5000);
-    },
-    { passive: true }
-  );
+  document.addEventListener(evt, () => {
+    clearTimeout(activityTimer);
+    activityTimer = setTimeout(() => {
+      invoke('user_active').catch(() => {});
+    }, 5000);
+  }, { passive: true });
 });
 
 const $ = (sel) => document.querySelector(sel);
@@ -27,17 +21,12 @@ const state = {
   streams: new Map(),
   liked: new Set(),
   currentTrackId: null,
-  searchTimer: null,
-  lastSearch: '',
-  lastSearchData: null,
   silaGenres: [],
   fullSilaQueue: [],
 };
 
 const wave = { active: false, source: null, count: 0, name: null };
 let hls = null;
-
-
 
 const MAX_QUEUE = 10;
 
@@ -93,6 +82,7 @@ function restoreLastState() {
     updatePlayerUI(track);
     discordStatus(track, false);
     highlightQueue();
+    updateTrackIndicators();
   } catch (e) {
     
   }
@@ -166,17 +156,12 @@ function markActive(view) {
   });
 }
 
-let toastTimer;
+let timer;
 function toast(msg, ok = false) {
-  const el = $('#toast');
-  el.textContent = msg;
-  el.style.color = ok ? 'var(--accent)' : 'var(--text)';
-  el.classList.remove('hidden');
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => el.classList.add('hidden'), 3200);
+  // ...
+  clearTimeout(timer);
+  timer = setTimeout(() => el.classList.add('hidden'), 3200);
 }
-
-
 
 function setLoginStatus(msg, ok = false) {
   const el = $('#login-status');
@@ -337,37 +322,23 @@ function showView(view) {
     .querySelectorAll('.nav-item[data-view="settings"]')
     .forEach((n) => n.classList.remove('active'));
   markActive(view);
+  
   if (view === 'home') {
-    renderHome();
+    renderContent(renderHomeContent);
   } else if (view === 'search') {
-    if (state.lastSearchData) renderSearchResults(state.lastSearchData);
-    else
-      renderPlaceholder(
-        '🔎',
-        'Начните вводить запрос, чтобы найти треки, артистов, альбомы и плейлисты'
-      );
+    if (state.lastSearchData) {
+      renderContent(renderSearchResultsContent, state.lastSearchData);
+    } else {
+      renderContent(renderPlaceholderContent, '🔎', 'Начните вводить запрос, чтобы найти треки, артистов, альбомы и плейлисты');
+    }
     $('#search-input').focus();
   } else if (view === 'library') {
-    loadLibrary();
+    renderContent(loadLibraryContent);
   } else if (view === 'playlists') {
-    loadPlaylists();
+    renderContent(loadPlaylistsContent);
   } else if (view === 'settings') {
-    renderSettings();
+    renderContent(renderSettingsContent);
   }
-}
-
-function renderPlaceholder(icon, text) {
-  const content = $('#content');
-  content.innerHTML = '';
-  const p = document.createElement('div');
-  p.className = 'placeholder';
-  const big = document.createElement('div');
-  big.className = 'big';
-  big.textContent = icon;
-  const t = document.createElement('div');
-  t.textContent = text || '';
-  p.append(big, t);
-  content.append(p);
 }
 
 function spinnerBlock() {
@@ -375,15 +346,6 @@ function spinnerBlock() {
   p.className = 'placeholder';
   p.innerHTML = '<div class="spinner" style="position:static;transform:none;margin:0 auto 14px;"></div>';
   return p;
-}
-
-function renderError(e) {
-  const content = $('#content');
-  content.innerHTML = '';
-  const p = document.createElement('div');
-  p.className = 'placeholder';
-  p.innerHTML = `<div class="big">⚠️</div><div>${esc(String(e))}</div>`;
-  content.append(p);
 }
 
 function section(title, count) {
@@ -406,9 +368,10 @@ function section(title, count) {
 
 const GENRES = ['Поп', 'Рок', 'Хип-хоп', 'Электроника', 'Джаз', 'Классика', 'Лоу-фай', 'Инди', 'Танцевальная'];
 
-async function renderHome() {
+async function renderHomeContent() {
   const content = $('#content');
   content.innerHTML = '';
+  
   const title = document.createElement('div');
   title.className = 'view-title';
   title.textContent = 'Главное';
@@ -431,6 +394,15 @@ async function renderHome() {
       const data = await invoke('get_artists', { ids });
       const arts = ((data && data.getArtists) || []).filter((a) => a && a.id);
       aGrid.append(...arts.map(artistWaveCard));
+      
+      setTimeout(() => {
+        document.querySelectorAll('.card').forEach((card, i) => {
+          setTimeout(() => {
+            card.classList.add('visible');
+          }, i * 50 + 50);
+        });
+      }, 100);
+      
     } else {
       const p = document.createElement('div');
       p.className = 'placeholder';
@@ -439,7 +411,7 @@ async function renderHome() {
       aGrid.append(p);
     }
   } catch (e) {
-    
+    // 
   }
 }
 
@@ -770,9 +742,9 @@ function doSearch(query) {
       state.lastSearch = q;
       state.lastSearchData = data;
       markActive('search');
-      renderSearchResults(data);
+      renderContent(renderSearchResultsContent, data);
     } catch (e) {
-      renderError(e);
+      renderErrorContent(e);
     } finally {
       $('#search-spinner').classList.add('hidden');
     }
@@ -784,7 +756,7 @@ $('#search-input').addEventListener('input', () => {
   if (!q) {
     state.lastSearch = '';
     state.lastSearchData = null;
-    renderPlaceholder(
+    renderContent(renderPlaceholderContent,
       '🔎',
       'Начните вводить запрос, чтобы найти треки, артистов, альбомы и плейлисты'
     );
@@ -793,9 +765,10 @@ $('#search-input').addEventListener('input', () => {
   doSearch(q);
 });
 
-function renderSearchResults(data) {
+function renderSearchResultsContent(data) {
   const content = $('#content');
   content.innerHTML = '';
+  
   const search = (data && data.search) || {};
   const tracks = (search.tracks && search.tracks.items) || [];
   const artists = (search.artists && search.artists.items) || [];
@@ -803,7 +776,7 @@ function renderSearchResults(data) {
   const playlists = (search.playlists && search.playlists.items) || [];
 
   if (!tracks.length && !artists.length && !releases.length && !playlists.length) {
-    renderPlaceholder('🙈', `Ничего не найдено по запросу «${esc(state.lastSearch)}»`);
+    renderPlaceholderContent('🙈', `Ничего не найдено по запросу «${esc(state.lastSearch)}»`);
     return;
   }
 
@@ -838,12 +811,11 @@ function renderSearchResults(data) {
   }
 }
 
-
-
-async function loadLibrary() {
+async function loadLibraryContent() {
   const content = $('#content');
   content.innerHTML = '';
   content.append(spinnerBlock());
+  
   try {
     const [tracksData, coll] = await Promise.all([invoke('user_tracks'), invoke('user_collection')]);
     const trackIds = ((tracksData && tracksData.collection && tracksData.collection.tracks) || [])
@@ -861,10 +833,7 @@ async function loadLibrary() {
     content.append(title);
 
     if (!trackIds.length && !releaseIds.length && !playlistIds.length) {
-      renderPlaceholder(
-        '🎵',
-        'Здесь появятся треки, альбомы и плейлисты, которые вы добавите в избранное на zvuk.com'
-      );
+      renderPlaceholderContent('🎵', 'Здесь появятся треки, альбомы и плейлисты, которые вы добавите в избранное на zvuk.com');
       return;
     }
 
@@ -900,20 +869,31 @@ async function loadLibrary() {
     }
   } catch (e) {
     content.innerHTML = '';
-    renderError(e);
+    renderErrorContent(e);
   }
 }
 
-async function loadPlaylists() {
+function renderErrorContent(e) {
+  const content = $('#content');
+  content.innerHTML = '';
+  const p = document.createElement('div');
+  p.className = 'placeholder';
+  p.innerHTML = `<div class="big">⚠️</div><div>${esc(String(e))}</div>`;
+  content.append(p);
+}
+
+async function loadPlaylistsContent() {
   const content = $('#content');
   content.innerHTML = '';
   content.append(spinnerBlock());
+  
   try {
     const pd = await invoke('user_playlists');
     const ids = ((pd && pd.collection && pd.collection.playlists) || [])
       .map((p) => p.id)
       .filter(Boolean);
     content.innerHTML = '';
+    
     const head = document.createElement('div');
     head.className = 'view-head';
     const title = document.createElement('div');
@@ -927,9 +907,10 @@ async function loadPlaylists() {
     content.append(head);
 
     if (!ids.length) {
-      renderPlaceholder('🗂️', 'Плейлистов пока нет. Создайте первый — это удобно');
+      renderPlaceholderContent('🗂️', 'Плейлистов пока нет. Создайте первый — это удобно');
       return;
     }
+    
     const data = await invoke('get_playlists', { ids });
     const pls = ((data && data.playlists) || []).filter((p) => p && p.id);
     const grid = document.createElement('div');
@@ -938,11 +919,190 @@ async function loadPlaylists() {
     content.append(grid);
   } catch (e) {
     content.innerHTML = '';
-    renderError(e);
+    renderErrorContent(e);
   }
 }
 
+function renderSettingsContent() {
+  const content = $('#content');
+  content.innerHTML = '';
+  
+  const title = document.createElement('div');
+  title.className = 'view-title';
+  title.textContent = 'Настройки';
+  content.append(title);
 
+  const body = document.createElement('div');
+  body.className = 'settings-body';
+
+  const qGroup = document.createElement('div');
+  qGroup.className = 'settings-group';
+  const qTitle = document.createElement('div');
+  qTitle.className = 'settings-group-title';
+  qTitle.textContent = 'Качество звука';
+  const qRow = document.createElement('label');
+  qRow.className = 'switch-row';
+  const qSpan = document.createElement('span');
+  const qSmall = document.createElement('small');
+  qSmall.textContent = '(FLAC, если доступен)';
+  qSpan.append('Hi-Fi звук ', qSmall);
+  const qInput = document.createElement('input');
+  qInput.type = 'checkbox';
+  qInput.id = 'setting-hifi';
+  qInput.checked = settings.hifi;
+  qInput.addEventListener('change', () => {
+    settings.hifi = qInput.checked;
+    saveSettings();
+    state.streams.clear();
+    toast(settings.hifi ? 'Hi-Fi включён (FLAC)' : 'Обычное качество', true);
+  });
+  qRow.append(qSpan, qInput);
+  qGroup.append(qTitle, qRow);
+  body.append(qGroup);
+
+  const hGroup = document.createElement('div');
+  hGroup.className = 'settings-group';
+  const hTitle = document.createElement('div');
+  hTitle.className = 'settings-group-title';
+  hTitle.textContent = 'Горячие клавиши';
+  const hotkeys = document.createElement('div');
+  hotkeys.className = 'hotkey-list';
+  hotkeys.id = 'hotkey-list';
+  hGroup.append(hTitle, hotkeys);
+  body.append(hGroup);
+
+  const dGroup = document.createElement('div');
+  dGroup.className = 'settings-group';
+  const dTitle = document.createElement('div');
+  dTitle.className = 'settings-group-title';
+  dTitle.textContent = 'Discord';
+  const dRow = document.createElement('label');
+  dRow.className = 'switch-row';
+  const dSpan = document.createElement('span');
+  dSpan.append('Показывать статус в Discord');
+  const dInput = document.createElement('input');
+  dInput.type = 'checkbox';
+  dInput.id = 'setting-discord';
+  dInput.checked = settings.discordRpc;
+  dInput.addEventListener('change', () => {
+    settings.discordRpc = dInput.checked;
+    saveSettings();
+    if (!settings.discordRpc) {
+      invoke('discord_clear').catch(() => {});
+    } else {
+      discordStatus(state.queue[state.queueIndex], !audio.paused);
+    }
+    toast(settings.discordRpc ? 'Discord RPC включён' : 'Discord RPC выключен', true);
+  });
+  dRow.append(dSpan, dInput);
+  dGroup.append(dTitle, dRow);
+  body.append(dGroup);
+
+  const lGroup = document.createElement('div');
+  lGroup.className = 'settings-group';
+  const logoutBtn = document.createElement('button');
+  logoutBtn.className = 'btn btn-danger';
+  logoutBtn.style.alignSelf = 'flex-start';
+  logoutBtn.textContent = 'Выйти из аккаунта';
+  logoutBtn.addEventListener('click', logout);
+  lGroup.append(logoutBtn);
+  body.append(lGroup);
+
+  content.append(body);
+  renderHotkeys();
+}
+
+function trackRow(track, index, list, opts = {}) {
+  const row = document.createElement('div');
+  row.className = 'track-row';
+  if (track.id === state.currentTrackId) row.classList.add('playing');
+  if (track.id === state.currentTrackId && audio.paused) row.classList.add('paused');
+  row.dataset.id = track.id;
+
+  const indicator = document.createElement('div');
+  indicator.className = 'track-playing-indicator';
+  
+  const waveBars = document.createElement('div');
+  waveBars.className = 'wave-bars';
+  for (let i = 0; i < 5; i++) {
+    const bar = document.createElement('span');
+    bar.className = 'wave-bar';
+    waveBars.appendChild(bar);
+  }
+  indicator.appendChild(waveBars);
+  
+  const num = document.createElement('span');
+  num.className = 'track-num';
+  num.textContent = String(index + 1);
+  
+  const isPlaying = track.id === state.currentTrackId;
+  if (isPlaying) {
+    indicator.style.display = 'inline-flex';
+    num.style.display = 'none';
+  } else {
+    indicator.style.display = 'none';
+    num.style.display = 'inline';
+  }
+
+  const cover = document.createElement('img');
+  cover.className = 'track-cover';
+  cover.src = trackImage(track, '84x84');
+  cover.alt = '';
+
+  const main = document.createElement('div');
+  main.className = 'track-main';
+  const title = document.createElement('div');
+  title.className = 'track-title';
+  title.textContent = track.title || '';
+  const artist = document.createElement('div');
+  artist.className = 'track-artist';
+  artist.textContent = artistString(track);
+  main.append(title, artist);
+
+  const pl = document.createElement('button');
+  pl.className = 'pl-btn';
+  pl.title = 'В плейлист';
+  pl.innerHTML = `<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M15 6H3v2h12V6zm0 4H3v2h12v-2zM3 16h8v-2H3v2zm10-5l7 4-7 4v-8z"/></svg>`;
+  pl.dataset.id = track.id;
+
+  const like = document.createElement('button');
+  like.className = 'like-btn';
+  const liked = state.liked.has(track.id);
+  like.innerHTML = liked 
+    ? `<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>`
+    : `<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>`;
+
+  const dur = document.createElement('span');
+  dur.className = 'track-duration';
+  dur.textContent = fmtTime(track.duration);
+
+  let rem = null;
+  if (opts.remove) {
+    rem = document.createElement('button');
+    rem.className = 'remove-btn';
+    rem.textContent = '✕';
+    rem.title = 'Удалить из плейлиста';
+    rem.addEventListener('click', (e) => {
+      e.stopPropagation();
+      opts.remove(track);
+    });
+  }
+
+  row.append(indicator, num, cover, main, pl, like, rem || dur);
+  if (rem) row.append(dur);
+
+  row.addEventListener('click', () => playQueue(list, index));
+  pl.addEventListener('click', (e) => {
+    e.stopPropagation();
+    openAddToPlaylist(track);
+  });
+  like.addEventListener('click', (e) => {
+    e.stopPropagation();
+    toggleLike(track, like);
+  });
+  
+  return row;
+}
 
 let modalState = { track: null };
 
@@ -1037,7 +1197,8 @@ $('#modal-new-btn').addEventListener('click', async () => {
     await invoke('create_playlist', { name, items });
     toast(`Плейлист «${name}» создан`, true);
     closeModal();
-    if (state.view === 'playlists') loadPlaylists();
+    if (state.view === 'playlists')
+      renderContent(loadPlaylistsContent);
   } catch (e) {
     toast(String(e));
   }
@@ -1047,8 +1208,6 @@ $('#playlist-modal').addEventListener('click', (e) => {
   if (e.target.id === 'playlist-modal') closeModal();
 });
 
-
-
 async function openPlaylist(id) {
   const content = $('#content');
   content.innerHTML = '';
@@ -1057,14 +1216,13 @@ async function openPlaylist(id) {
     const data = await invoke('get_playlists', { ids: [String(id)] });
     const pl = (data && data.playlists && data.playlists[0]) || null;
     if (!pl || !pl.id) {
-      content.innerHTML = '';
-      renderError('Плейлист не найден');
+      renderContent(renderErrorContent, 'Плейлист не найден');
       return;
     }
     renderDetail(content, { kind: 'playlist', item: pl });
   } catch (e) {
     content.innerHTML = '';
-    renderError(e);
+    renderContent(renderErrorContent, e);
   }
 }
 
@@ -1076,15 +1234,50 @@ async function openRelease(id) {
     const data = await invoke('get_releases', { ids: [String(id)], withTracks: true });
     const rel = (data && data.getReleases && data.getReleases[0]) || null;
     if (!rel || !rel.id) {
-      content.innerHTML = '';
-      renderError('Альбом не найден');
+      renderContent(renderErrorContent, 'Альбом не найден');
       return;
     }
     renderDetail(content, { kind: 'release', item: rel });
   } catch (e) {
     content.innerHTML = '';
-    renderError(e);
+    renderContent(renderErrorContent, e);
   }
+}
+
+async function renderContent(renderFn, ...args) {
+  const content = $('#content');
+  
+  if (content.children.length > 0) {
+    content.classList.add('fade-out');
+    await new Promise(resolve => setTimeout(resolve, 300));
+    content.innerHTML = '';
+    content.classList.remove('fade-out');
+    await renderFn(...args);
+    content.classList.add('fade-in');
+    setTimeout(() => {
+      content.classList.remove('fade-in');
+    }, 500);
+  } else {
+    await renderFn(...args);
+    content.classList.add('fade-in');
+    setTimeout(() => {
+      content.classList.remove('fade-in');
+    }, 500);
+  }
+}
+
+function renderPlaceholderContent(icon, text) {
+  const content = $('#content');
+  content.innerHTML = '';
+  const p = document.createElement('div');
+  p.className = 'placeholder';
+  const big = document.createElement('div');
+  big.className = 'big';
+  big.textContent = icon;
+  const t = document.createElement('div');
+  t.textContent = text || '';
+  p.append(big, t);
+  content.append(p);
 }
 
 function renderDetail(content, { kind, item }) {
@@ -1131,7 +1324,7 @@ function renderDetail(content, { kind, item }) {
         await invoke('delete_playlist', { id: String(item.id) });
         toast('Плейлист удалён', true);
         showView('playlists');
-        loadPlaylists();
+        renderContent(loadPlaylistsContent);
       } catch (e) {
         toast(String(e));
       }
@@ -1144,7 +1337,7 @@ function renderDetail(content, { kind, item }) {
 
   const tracks = (item.tracks || []).filter((t) => t && t.id);
   if (!tracks.length) {
-    renderPlaceholder('📻', 'В этом плейлисте пока нет треков');
+    renderPlaceholderContent('📻', 'В этом плейлисте пока нет треков');
     return;
   }
   tracks.forEach((t) => {
@@ -1192,7 +1385,7 @@ async function openArtist(id) {
     const a = (data && data.getArtists && data.getArtists[0]) || null;
     if (!a || !a.id) {
       content.innerHTML = '';
-      renderError('Артист не найден');
+      renderContent(renderErrorContent, 'Артист не найден');
       return;
     }
     content.innerHTML = '';
@@ -1263,7 +1456,7 @@ async function openArtist(id) {
     }
   } catch (e) {
     content.innerHTML = '';
-    renderError(e);
+    renderContent(renderErrorContent, e);
   }
 }
 
@@ -1332,77 +1525,6 @@ function renderTrackList(tracks, container, opts = {}) {
   container.append(list);
 }
 
-function trackRow(track, index, list, opts = {}) {
-  const row = document.createElement('div');
-  row.className = 'track-row';
-  if (track.id === state.currentTrackId) row.classList.add('playing');
-  row.dataset.id = track.id;
-
-  const num = document.createElement('span');
-  num.className = 'track-num';
-  num.textContent = '♫';
-
-  const cover = document.createElement('img');
-  cover.className = 'track-cover';
-  cover.src = trackImage(track, '84x84');
-  cover.alt = '';
-
-  const main = document.createElement('div');
-  main.className = 'track-main';
-  const title = document.createElement('div');
-  title.className = 'track-title';
-  title.textContent = track.title || '';
-  const artist = document.createElement('div');
-  artist.className = 'track-artist';
-  artist.textContent = artistString(track);
-  main.append(title, artist);
-
-  const pl = document.createElement('button');
-  pl.className = 'pl-btn';
-  pl.title = 'В плейлист';
-  pl.innerHTML = `<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M15 6H3v2h12V6zm0 4H3v2h12v-2zM3 16h8v-2H3v2zm10-5l7 4-7 4v-8z"/></svg>`;
-  pl.dataset.id = track.id;
-
-  const like = document.createElement('button');
-  like.className = 'like-btn';
-  const liked = state.liked.has(track.id);
-  like.innerHTML = liked 
-    ? `<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>`
-    : `<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>`;
-
-  const dur = document.createElement('span');
-  dur.className = 'track-duration';
-  dur.textContent = fmtTime(track.duration);
-
-  let rem = null;
-  if (opts.remove) {
-    rem = document.createElement('button');
-    rem.className = 'remove-btn';
-    rem.textContent = '✕';
-    rem.title = 'Удалить из плейлиста';
-    rem.addEventListener('click', (e) => {
-      e.stopPropagation();
-      opts.remove(track);
-    });
-  }
-
-  row.append(num, cover, main, pl, like, rem || dur);
-  if (rem) row.append(dur);
-
-  row.addEventListener('click', () => playQueue(list, index));
-  pl.addEventListener('click', (e) => {
-    e.stopPropagation();
-    openAddToPlaylist(track);
-  });
-  like.addEventListener('click', (e) => {
-    e.stopPropagation();
-    toggleLike(track, like);
-  });
-  return row;
-}
-
-
-
 async function toggleLike(track, btn) {
   const id = track.id;
   const liked = state.liked.has(id);
@@ -1460,6 +1582,7 @@ async function playCurrent() {
   updatePlayerUI(track);
   discordStatus(track, true);
   highlightQueue();
+  updateTrackIndicators();
   saveLastState();
   let url = state.streams.get(track.id);
   if (!url) {
@@ -1651,6 +1774,34 @@ function updateRepeatBtn() {
   btn.title = titles[settings.repeat];
 }
 
+function updateTrackIndicators() {
+  const currentId = state.currentTrackId;
+  const isPaused = audio.paused;
+  
+  document.querySelectorAll('.track-row').forEach((row) => {
+    const isPlaying = row.dataset.id === currentId;
+    const indicator = row.querySelector('.track-playing-indicator');
+    const num = row.querySelector('.track-num');
+    
+    if (indicator && num) {
+      if (isPlaying) {
+        indicator.style.display = 'inline-flex';
+        num.style.display = 'none';
+        row.classList.add('playing');
+        if (isPaused) {
+          row.classList.add('paused');
+        } else {
+          row.classList.remove('paused');
+        }
+      } else {
+        indicator.style.display = 'none';
+        num.style.display = 'inline';
+        row.classList.remove('playing', 'paused');
+      }
+    }
+  });
+}
+
 function updateShuffleBtn() {
   const btn = $('#btn-shuffle');
   btn.classList.toggle('active', settings.shuffle);
@@ -1682,10 +1833,12 @@ audio.addEventListener('ended', () => {
 audio.addEventListener('play', () => {
   updatePlayBtn();
   discordStatus(state.queue[state.queueIndex], true);
+  updateTrackIndicators();
 });
 audio.addEventListener('pause', () => {
   updatePlayBtn();
   discordStatus(state.queue[state.queueIndex], false);
+  updateTrackIndicators();
 });
 audio.addEventListener('error', () => {
   toast('Ошибка воспроизведения');
@@ -1869,94 +2022,6 @@ function eventCombo(e) {
   if (key === 'Escape') return [...parts, 'Escape'].join('+');
   if (key.length === 1) return [...parts, key.toLowerCase()].join('+');
   return [...parts, key].join('+');
-}
-
-function renderSettings() {
-  const content = $('#content');
-  content.innerHTML = '';
-  const title = document.createElement('div');
-  title.className = 'view-title';
-  title.textContent = 'Настройки';
-  content.append(title);
-
-  const body = document.createElement('div');
-  body.className = 'settings-body';
-
-  const qGroup = document.createElement('div');
-  qGroup.className = 'settings-group';
-  const qTitle = document.createElement('div');
-  qTitle.className = 'settings-group-title';
-  qTitle.textContent = 'Качество звука';
-  const qRow = document.createElement('label');
-  qRow.className = 'switch-row';
-  const qSpan = document.createElement('span');
-  const qSmall = document.createElement('small');
-  qSmall.textContent = '(FLAC, если доступен)';
-  qSpan.append('Hi-Fi звук ', qSmall);
-  const qInput = document.createElement('input');
-  qInput.type = 'checkbox';
-  qInput.id = 'setting-hifi';
-  qInput.checked = settings.hifi;
-  qInput.addEventListener('change', () => {
-    settings.hifi = qInput.checked;
-    saveSettings();
-    state.streams.clear();
-    toast(settings.hifi ? 'Hi-Fi включён (FLAC)' : 'Обычное качество', true);
-  });
-  qRow.append(qSpan, qInput);
-  qGroup.append(qTitle, qRow);
-  body.append(qGroup);
-
-  const hGroup = document.createElement('div');
-  hGroup.className = 'settings-group';
-  const hTitle = document.createElement('div');
-  hTitle.className = 'settings-group-title';
-  hTitle.textContent = 'Горячие клавиши';
-  const hotkeys = document.createElement('div');
-  hotkeys.className = 'hotkey-list';
-  hotkeys.id = 'hotkey-list';
-  hGroup.append(hTitle, hotkeys);
-  body.append(hGroup);
-
-  const dGroup = document.createElement('div');
-  dGroup.className = 'settings-group';
-  const dTitle = document.createElement('div');
-  dTitle.className = 'settings-group-title';
-  dTitle.textContent = 'Discord';
-  const dRow = document.createElement('label');
-  dRow.className = 'switch-row';
-  const dSpan = document.createElement('span');
-  dSpan.append('Показывать статус в Discord');
-  const dInput = document.createElement('input');
-  dInput.type = 'checkbox';
-  dInput.id = 'setting-discord';
-  dInput.checked = settings.discordRpc;
-  dInput.addEventListener('change', () => {
-    settings.discordRpc = dInput.checked;
-    saveSettings();
-    if (!settings.discordRpc) {
-      invoke('discord_clear').catch(() => {});
-    } else {
-      discordStatus(state.queue[state.queueIndex], !audio.paused);
-    }
-    toast(settings.discordRpc ? 'Discord RPC включён' : 'Discord RPC выключен', true);
-  });
-  dRow.append(dSpan, dInput);
-  dGroup.append(dTitle, dRow);
-  body.append(dGroup);
-
-  const lGroup = document.createElement('div');
-  lGroup.className = 'settings-group';
-  const logoutBtn = document.createElement('button');
-  logoutBtn.className = 'btn btn-danger';
-  logoutBtn.style.alignSelf = 'flex-start';
-  logoutBtn.textContent = 'Выйти из аккаунта';
-  logoutBtn.addEventListener('click', logout);
-  lGroup.append(logoutBtn);
-  body.append(lGroup);
-
-  content.append(body);
-  renderHotkeys();
 }
 
 document.addEventListener('keydown', (e) => {
