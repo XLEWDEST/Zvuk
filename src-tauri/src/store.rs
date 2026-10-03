@@ -2,7 +2,9 @@ use std::path::{Path, PathBuf};
 
 use tauri::{AppHandle, Manager};
 
+#[cfg(not(target_os = "linux"))]
 const SERVICE: &str = "app.zvuk.desktop";
+#[cfg(not(target_os = "linux"))]
 const ACCOUNT: &str = "default";
 const FALLBACK_FILE: &str = "token.txt";
 const LEGACY_DIR_NAME: &str = "ZvukDesktop";
@@ -29,12 +31,22 @@ fn legacy_fallback_path() -> PathBuf {
 }
 
 pub fn save(app: &AppHandle, token: &str) -> Result<(), String> {
-    match keyring::Entry::new(SERVICE, ACCOUNT) {
-        Ok(entry) => match entry.set_password(token) {
-            Ok(()) => Ok(()),
+    // On Linux the system keyring is unreliable (writes may succeed into a
+    // non-persistent store while later reads fail), so the token is kept
+    // in the app data file only.
+    #[cfg(target_os = "linux")]
+    {
+        save_to(&fallback_dir(app), token)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        match keyring::Entry::new(SERVICE, ACCOUNT) {
+            Ok(entry) => match entry.set_password(token) {
+                Ok(()) => Ok(()),
+                Err(_) => save_to(&fallback_dir(app), token),
+            },
             Err(_) => save_to(&fallback_dir(app), token),
-        },
-        Err(_) => save_to(&fallback_dir(app), token),
+        }
     }
 }
 
@@ -61,9 +73,12 @@ fn save_to(dir: &Path, token: &str) -> Result<(), String> {
 }
 
 pub fn load(app: &AppHandle) -> Option<String> {
-    if let Ok(entry) = keyring::Entry::new(SERVICE, ACCOUNT) {
-        if let Ok(token) = entry.get_password() {
-            return Some(token);
+    #[cfg(not(target_os = "linux"))]
+    {
+        if let Ok(entry) = keyring::Entry::new(SERVICE, ACCOUNT) {
+            if let Ok(token) = entry.get_password() {
+                return Some(token);
+            }
         }
     }
     load_from(&fallback_dir(app)).or_else(|| migrate_legacy(app))
@@ -91,8 +106,11 @@ fn migrate_legacy(app: &AppHandle) -> Option<String> {
 }
 
 pub fn clear(app: &AppHandle) -> Result<(), String> {
-    if let Ok(entry) = keyring::Entry::new(SERVICE, ACCOUNT) {
-        let _ = entry.delete_credential();
+    #[cfg(not(target_os = "linux"))]
+    {
+        if let Ok(entry) = keyring::Entry::new(SERVICE, ACCOUNT) {
+            let _ = entry.delete_credential();
+        }
     }
     clear_in(&fallback_dir(app))?;
     let legacy = legacy_fallback_dir();
